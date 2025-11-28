@@ -1,73 +1,39 @@
 # Pipeline explannation
 
-## 1. Introduction générale
+## 1. Introduction 
 
-Le pipeline présenté dans ce document est conçu pour automatiser l’ingestion, l’extraction et l’analyse sémantique de documents administratifs variés (PDF, XML). Ce système a été pensé pour traiter des volumes importants, de manière robuste, tout en garantissant la traçabilité et la structuration des données.
+The pipeline explained in this paper is meant to make it easier to take in, pull out, and understand different types of administrative documents like PDFs and XML files. This system is built to manage a lot of information effectively, while also keeping track of the data and its organization. 
 
-Le point de départ du pipeline est un environnement MinIO qui joue le rôle de stockage objet et contient des dossiers organisés par type de document. À partir de cet environnement, l’ensemble du processus se déroule sans intervention humaine : découverte des fichiers, téléchargement, extraction du contenu, restructuration grâce à un modèle de langage, sauvegarde intermédiaire dans une base SQLite, et enfin ingestion dans une base analytique ClickHouse.
+The process starts with a MinIO environment that serves as storage for files, neatly sorted by the type of document. From this storage area, everything happens automatically without needing anyone to do it manually. This includes finding the files, downloading them, pulling out the content, reorganizing it with a language model, saving it temporarily in an SQLite database, and finally adding it to a ClickHouse database for analysis. 
 
-Le pipeline est entièrement orchestré par le fichier main.py, qui coordonne successivement toutes les étapes. Chaque composant du système est isolé dans un module dédié, ce qui favorise non seulement la lisibilité du code, mais aussi sa maintenabilité et sa capacité à évoluer dans le futur.
+The whole pipeline is run by a main. py file, which makes sure each part happens in the right order. Each part of the system is separated into its own module. This separation helps make the code easier to read, as well as easier to update and expand in the future.
 
-## 2. Vue d’ensemble de l’architecture
+## 2. diagram and overview
 
 Voici une première représentation globale du fonctionnement du pipeline, depuis la découverte des fichiers jusqu’à l’ingestion dans ClickHouse :
 
-                                 ┌──────────────────────────┐
-                                 │        MinIO (input)      │
-                                 │   Dossiers + fichiers     │
-                                 └───────────────┬──────────┘
-                                                 │
-                                                 ▼
-                                 ┌──────────────────────────┐
-                                 │   Listing des dossiers   │
-                                 │  et récupération des PDF │
-                                 └───────────────┬──────────┘
-                                                 │
-                                                 ▼
-                      ┌─────────────────────────────────────────────────────────────┐
-                      │                 Extraction PDF / XML                        │
-                      │  - Texte natif (pdfplumber)                                 │
-                      │  - Tables                                                   │
-                      │  - OCR automatique (EasyOCR + PyMuPDF)                      │
-                      │  - Extraction XML                                           │
-                      └───────────────┬─────────────────────────────────────────────┘
-                                      │
-                                      ▼
-                      ┌─────────────────────────────────────────────────────────────┐
-                      │     Sauvegarde SQLite + Upload sur MinIO (backups)          │
-                      │        Base regroupant extraction PDF + tables + XML        │
-                      └───────────────┬─────────────────────────────────────────────┘
-                                      │
-                                      ▼
-                      ┌─────────────────────────────────────────────────────────────┐
-                      │     Traitement sémantique via LLM                           │
-                      │   (prompt → réponse → parsing → validation schema)          │
-                      └───────────────┬─────────────────────────────────────────────┘
-                                      │
-                                      ▼
-                      ┌─────────────────────────────────────────────────────────────┐
-                      │               Ingestion dans ClickHouse                     │
-                      │      Nettoyage → déduplication → insertion MergeTree        │
-                      └─────────────────────────────────────────────────────────────┘
+<figure>
+  <img src="images/pipeline.png" alt="Pipeline" width="500">
+  <figcaption>Figure 1 — architecture </figcaption>
+</figure>
 
 
-L’architecture globale suit une logique linéaire, mais chaque étape peut gérer ses propres erreurs ou corrections automatiques. On peut la décrire comme une succession de transformations du document initial jusqu’à sa version finale prête pour l’analyse dans ClickHouse.
 
-Le pipeline commence par explorer le stockage MinIO afin de déterminer les dossiers et les fichiers pertinents à traiter. Une fois les documents identifiés, chaque fichier est téléchargé en mémoire puis transmis au module d’extraction. Ce module traite les PDF en extrayant d’abord le texte natif, puis bascule automatiquement vers une extraction OCR si le texte est jugé insuffisant ou illisible. Les fichiers XML sont interprétés différemment : ils sont chargés tels quels, nettoyés et convertis en une version texte prête à être traitée par la suite.
+The whole setup works in a straight line, but every part is capable of fixing its own mistakes. Think of it as a series of adjustments that converts the initial document into its ultimate form, which is ready to be examined in ClickHouse. 
 
-Après cette phase d’extraction, toutes les informations obtenues sont stockées dans une base SQLite temporaire, qui est ensuite sauvegardée dans un bucket MinIO séparé. Cette sauvegarde joue un rôle essentiel dans la traçabilité du pipeline : elle permet de garder une archive complète de l’extraction brute, avant toute transformation sémantique par un modèle de langage.
+The process starts by checking the MinIO storage to find the right folders and files to work on. After figuring out which documents to use, each one is downloaded to the computer’s memory and then sent to the extraction section. This part deals with PDFs by first getting the original text from them, and if that text isn’t good enough or hard to read, it automatically uses a method called OCR to extract it instead. XML files are handled differently; they are directly loaded, cleaned up, and turned into a text format to be ready for the next steps. 
 
-L’étape suivante constitue le cœur du traitement métier. Les extraits textuels et XML sont soumis à un modèle de langage (LLM) via une API. Le modèle reçoit un prompt construit automatiquement à partir d’un schéma JSON qui définit les champs attendus pour ce type de document. La sortie du modèle est ensuite analysée, nettoyée, corrigée et validée. Enfin, les données validées sont envoyées dans ClickHouse, où elles sont insérées de manière dédupliquée.  
+Once this extraction is done, all the collected data is kept in a temporary SQLite database, and then it is backed up to a different MinIO bucket. This backup is really important for keeping track of the process, as it stores a complete record of the original data before any changes are made by a language model. 
 
-## 3. Récupération et découverte des documents dans MinIO
+The following phase is where the main business actions happen. Text and XML pieces are sent to a Language Learning Model (LLM) through an API. The model gets a request that is automatically created from a JSON format that describes the fields needed for that type of document. The results from the model are then cleaned up, corrected, and checked. In the end, the confirmed data gets sent to ClickHouse, where it is added in a way that prevents duplicates.
 
-Le pipeline débute par l’exploration du bucket MinIO d’entrée, via le module db_io/data_io.py. Ce module initialise un client MinIO configuré à partir des variables d’environnement. Il est entièrement responsable de la découverte de l’arborescence de documents.
+## 3. Retrieving and discovering documents in MinIO
 
-La fonction utilisée pour cela inspecte un chemin racine défini (BASE_DOCS_PATH) et identifie tous les sous-dossiers présents. Parmi ceux-ci, seuls certains types de documents sont considérés comme pertinents. Ils sont définis dans une liste interne selon les besoins du projet. Le code analyse ensuite le contenu de ces dossiers et en extrait la liste exacte des fichiers à traiter. Le résultat est un dictionnaire qui associe chaque type de document à une liste de fichiers à ingérer.
+The pipeline starts by looking into the input MinIO bucket using a module called db_io/data_io. py. This module sets up a MinIO client that uses settings from the environment. Its main job is to find the structure of the documents. 
 
-Dans sa version actuelle, le pipeline est configuré pour ne traiter qu’un seul type de document afin de faciliter les tests et la validation. Cependant, cette restriction n’est qu’un choix temporaire et peut être retirée pour étendre le traitement à tous les dossiers détectés.
+The function used for this checks a specific starting point (BASE_DOCS_PATH) and finds all the subfolders that are there. Out of these, only some types of documents are seen as important. These types are listed in an internal list based on what the project needs. The code then looks through the folders and lists the exact files that need to be processed. The outcome is a dictionary that connects each document type with a list of files to handle. 
 
-Une fois cette étape de découverte réalisée, le pipeline télécharge chaque fichier brut depuis MinIO sous forme binaire. Ces fichiers téléchargés sont ensuite transmis à la phase d’extraction.
+After finishing this discovery step, the pipeline downloads each raw file from MinIO in a binary format. Then, these files are moved on to the extraction phase.
 
 ## 4. Extraction du contenu (PDF, OCR et XML)
 
