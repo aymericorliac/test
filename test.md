@@ -39,151 +39,103 @@ After finishing this discovery step, the pipeline downloads each raw file from M
 
 L’extraction des fichiers constitue la partie la plus technique du pipeline. Elle est assurée par la classe DataExtractor du module extract.py, qui combine plusieurs stratégies selon la nature du document et sa qualité.
 
-### 4.1. Schéma global de l’extraction
+### 4.1. Overall extraction diagram
 
-Le fonctionnement peut être représenté de manière synthétique ainsi :
+The operation can be represented succinctly as follows:
 
-                ┌────────────────────────────────┐
-                │           Fichier PDF           │
-                └───────────────┬────────────────┘
-                                │
-                                ▼
-                ┌────────────────────────────────┐
-                │  Extraction texte natif (PDF)   │
-                │           + tables              │
-                └───────────────┬────────────────┘
-                        Est-ce lisible ? (score)
-                                │
-             ┌──────────────────┴──────────────────┐
-             │                                     │
-             ▼                                     ▼
-   Résultat natif conservé            OCR automatique déclenché
-             │                                     │
-             ▼                                     ▼
-   Nettoyage / normalisation            EasyOCR + PyMuPDF → Texte OCR
-             │                                     │
-             └──────────────────┬──────────────────┘
-                                ▼
-                ┌────────────────────────────────┐
-                │  Structure unifiée d’extraction │
-                └────────────────────────────────┘
-
-
-                ┌────────────────────────────────┐
-                │            Fichier XML          │
-                └────────────────────────────────┘
-                                │
-                                ▼
-                       Extraction brute XML
+   
 
 
 
-### 4.2. Extraction PDF native
+### 4.2. Native PDF extraction
 
-Lorsque le fichier est un PDF, la première tentative d’extraction est réalisée via la bibliothèque pdfplumber. Cette méthode permet d’obtenir directement le texte numérique du document, lorsqu’il existe, ainsi que la structure des pages. En parallèle, les éventuels tableaux contenus dans le PDF sont détectés et extraits, ce qui est particulièrement utile pour les documents comptables ou déclaratifs.
+When the document is in PDF format, the first try to get information is done using the pdfplumber tool. This tool helps to pull out the text from the file directly, if there is any, along with how the pages are arranged. At the same time, it finds and takes out any tables in the PDF, which is very handy for things like tax papers or financial records. 
 
-Un score de qualité du texte est ensuite calculé. Ce score permet de déterminer si le contenu extrait est exploitable ou si le document est probablement une version scannée dépourvue de texte numérique. Cette étape est essentielle, car un document scanné nécessitera un traitement complètement différent.
+Next, a score is given to check the quality of the text. This score shows if the text that was taken out can be used or if the document is probably a scanned copy that doesn’t have any digital text. This is an important step because handling a scanned document needs a completely different way to process it.
 
-### 4.3. Passage automatique par l’OCR
+### 4.3. Automatic OCR processing
 
-Lorsque le texte obtenu est trop bruité ou insuffisant, le pipeline bascule automatiquement vers une extraction OCR, qui consiste à produire une image de chaque page PDF puis à appliquer un modèle de reconnaissance optique de caractères.
+When the text that comes out is confusing or not good enough, the system automatically changes to a method called OCR extraction. This means it makes a picture of each page of the PDF and then uses something called an optical character recognition (OCR) model to read it. 
 
-Cette version OCR repose sur EasyOCR et PyMuPDF. PyMuPDF est utilisé pour rendre les pages en images haute résolution, tandis qu’EasyOCR analyse ces images et restitue un texte brut. À l’issue de cette reconnaissance, le texte est consolidé, nettoyé et normalisé avec la bibliothèque ftfy, ce qui permet d’obtenir un rendu lisible même pour des documents scannés de qualité médiocre.
+This OCR method uses EasyOCR and PyMuPDF. PyMuPDF helps create clear images of the pages, and EasyOCR looks at these images and gives back the text. After this reading step, the text is put together, fixed up, and made standard using the ftfy library, so it can be easy to read, even if the original documents aren’t very clear.
 
 ### 4.4. Extraction XML
 
-La gestion des fichiers XML est plus directe. Le pipeline lit le contenu complet du fichier, vérifie la taille du document, nettoie les éventuels caractères problématiques, puis retourne une structure simple contenant le texte XML. Cette approche garantit une parfaite conservation du contenu original, ce qui est essentiel pour les étapes suivantes.
+Handling XML files is way easier than dealing with PDFs because XML documents already have a clear structure that makes them usable right off the bat. When we find an XML file, the system reads all of it into memory at once, without needing to make complicated changes or break it down. This simple reading keeps the original content intact as it is stored in MinIO, including all the tags, attributes, and how everything is organized inside. 
 
-## 5. Sauvegarde en base SQLite et archivage MinIO
+After the file is opened, the system decodes what’s inside based on the type of encoding mentioned in the XML header, which is usually UTF-8. If there's no encoding given, it uses a standard one and checks to make sure there are no mistakes. The text is then lightly cleaned, where only non-printable characters or any clearly broken ones are taken out to keep everything stable for future processing without changing how the document is set up. 
 
-Après l’extraction, le pipeline sauvegarde l’ensemble des données dans une base SQLite temporaire. Cette étape est gérée par tasks/sqlite_saver.py et constitue une caractéristique importante du pipeline.
+Different from a usual XML parser, this system doesn’t try to change or interpret the tags. Instead, it just gives back the text as it is, avoiding typical mistakes that can happen with messed-up documents and letting a language model handle the content analysis. The system also notes the file size in bytes so it’s easier to manage and troubleshoot. 
 
-L’idée consiste à conserver un instantané complet de l’extraction brute sous un format universel, compact et facilement transportable : SQLite. Le système crée ainsi une base par type de document et y enregistre :
+In the end, the outcome is a simple but complete structure that includes the MinIO location, the type of document, the raw XML text, and some helpful metadata. This method makes sure the original document is kept perfectly while also getting it ready for analysis by the language learning model and for logging in ClickHouse.
 
-les extraits textuels PDF,
+## 5. SQLite database backup and MinIO archiving
 
-les tableaux identifiés dans les PDF,
+After the data is taken out, the system saves everything to a temporary SQLite database. This part is controlled by tasks/sqlite_saver. py and is very important for the process. 
 
-les contenus XML,
+The goal is to keep a complete record of the original data in a format that is universal, small, and easy to move around: SQLite. The system makes a database for each type of document and stores: 
 
-un ensemble de métadonnées liées à l’extraction.
+- text taken from PDFs, 
+- tables found in the PDFs, 
+- XML files, 
+- a group of information about the extraction. 
 
-Une fois la base SQLite constituée, elle est stockée sous forme d’un fichier temporaire, chargé en mémoire puis envoyé dans le bucket MinIO dédié aux backups. Le nom du fichier SQLite inclut automatiquement un horodatage ainsi que le type de document correspondant.
+After the SQLite database is made, it gets saved as a temporary file, loaded into memory, and then transferred to the MinIO bucket that is used for backups. The name of the SQLite file automatically has a timestamp and the type of document. 
 
-Cette stratégie présente plusieurs avantages. D’abord, elle offre un mécanisme de sauvegarde automatique fiable, en cas d’erreur au cours des traitements ultérieurs. Ensuite, elle permet de rerun le pipeline à partir des données extraites sans avoir à recharger ou réextraire les documents sources.
+This method has a few benefits. First, it gives a dependable automatic backup option in case something goes wrong during later processing. Second, it lets the system restart from the gathered data without needing to reload or extract the original documents again.
 
-## 6. Traitement sémantique et structuration via un modèle de langage (LLM)
+## 6. Semantic processing and structuring via a language model (LLM)
 
-Une fois les données extraites et sauvegardées, la prochaine étape consiste à transformer ces informations brutes en données structurées exploitables. Ce traitement sémantique est réalisé via un modèle de langage, appelé à travers une API locale ou externe. Cette étape est implémentée dans process.py.
+Once the information is gathered and saved, the next thing to do is change this basic data into organized data that can be used by other systems. PDF and XML extractions create unorganized text that can sometimes be messy or confusing, and how useful it is relies a lot on being able to get a good understanding of it. This is where understanding the meaning of the text becomes important. 
 
-### 6.1. Schéma général du traitement LLM
+This change is done by a smart language model, which can be used either on a local computer or through an outside service, like an API, depending on the setup. Its job is to make sense of the text, find important details such as numbers, dates, IDs, and other important fields, and rearrange this information into a common format. The aim is not just to pull out values, but also to grasp the logic of the document, how different elements are connected, and to spot any mistakes that might suggest that the initial data gathering was not done well. 
 
-Le fonctionnement global peut être représenté ainsi :
+All of this logic takes place in the process. py file. This file acts as a link between the gathered data (which comes from extract. py) and the language model. It gets the data ready to send to the language model: it cleans up the text, sets up prompts, adds examples, normalizes certain data fields, and follows rules to check validity. Process. py also manages handling errors: if a call to the language model does not work, it can try again, change the prompt, or clearly note that the document should be considered invalid. 
 
-                     ┌───────────────────────────────────────┐
-                     │      Texte extrait (PDF/XML)           │
-                     └──────────────────────┬────────────────┘
-                                            │
-                                            ▼
-                     ┌───────────────────────────────────────┐
-                     │ Construction du prompt à partir        │
-                     │ d’un schema JSON + texte extrait      │
-                     └──────────────────────┬────────────────┘
-                                            │
-                                            ▼
-                     ┌───────────────────────────────────────┐
-                     │      Appel API vers le modèle LLM      │
-                     └──────────────────────┬────────────────┘
-                                            │
-                                            ▼
-                     ┌───────────────────────────────────────┐
-                     │ Parsing, nettoyage des valeurs         │
-                     │ (dates, montants, CPF/CNPJ, etc.)      │
-                     └──────────────────────┬────────────────┘
-                                            │
-                                            ▼
-                     ┌───────────────────────────────────────┐
-                     │ Validation stricte via schema JSON     │
-                     └──────────────────────┬────────────────┘
-                                            │
-                                            ▼
-                     ┌───────────────────────────────────────┐
-                     │ Donnée structurée prête pour ingestion │
-                     └───────────────────────────────────────┘
+After getting the response from the model, the module turns it into a neat dictionary that meets the format needed for the next steps in the process. It also adds important information such as the type of document, any error messages, and a detailed record of the model’s response, which can help in fixing problems. 
 
-### 6.2. Construction du prompt
+This step is very important in the process: it changes the data from “raw text that was automatically gathered” into a “structured record,” which is then ready to be stored in ClickHouse and used by other business software.
 
-Le code commence par charger un schéma JSON spécifique à chaque type de document. Ce schéma définit les champs attendus ainsi que leurs types. Le texte extrait précédemment est ensuite injecté dans un prompt qui décrit précisément au modèle de langage les informations qu’il doit identifier.
+### 6.1. General scheme of LLM treatment
 
-La construction du prompt est particulièrement importante. Il doit être suffisamment explicite pour guider correctement le modèle, tout en évitant les ambiguïtés. Il contient donc la liste des champs exigés, des exemples de formats attendus, ainsi que l’extrait textuel complet du document.
+The overall functioning can be represented as follows:
 
-### 6.3. Requête vers le modèle de langage
 
-Une fois le prompt préparé, un appel HTTP est effectué vers l’API du modèle. Le modèle renvoie une réponse contenant du JSON, qui est ensuite interprété. Le pipeline prévoit la possibilité que le modèle fournisse un texte contenant du JSON, ou bien un JSON incomplet. De ce fait, un parsing robuste est implémenté pour extraire la structure JSON correcte quel que soit le format exact renvoyé.
+### 6.2. Construction of the prompt
 
-### 6.4 Nettoyage et normalisation de la réponse
+The message used in our system isn't just a bunch of words for the model; it's a full plan that clearly shows how to turn a raw document into organized data. It starts by telling the LLM what to do: read the content from a PDF or XML file and create properly formatted JSON. The format it needs to follow is provided right in the message, along with what each data field means and what type it is. This makes it clear for the model and ensures the output is always the same. 
 
-La sortie du modèle est ensuite nettoyée : correction des montants numériques, formatage normalisé des dates, interprétation correcte des CPF, CNPJ, ou autres identifiants administratifs. Cette étape permet de transformer des valeurs textuelles imprécises en formats cohérents utilisables dans une base analytique.
+The message also explains important business rules, like how to find a number, spot a date, or pull out official references. These instructions help the model understand the document better and focus on what's important. To help the LLM behave consistently, it gets examples to show what is needed, letting it copy the right format. 
 
-### 6.5 Validation par rapport au schéma
+In the end, the message sets strict rules for the final output: the model has to give valid JSON with no extra text. This strictness makes it easier to directly use the results in the next steps of the system, especially when saving them to ClickHouse.
 
-Une fois les données structurées, elles sont comparées au schéma initial. Toute divergence ou absence de champ est consignée dans un ensemble de métadonnées qui identifie les erreurs ou inconsistances. Cela permet à la fois de tracer la qualité de l’extraction et de définir des mécanismes de correction dans le futur.
+### 6.3. Request to the language model
 
-## 7. Insertion dans ClickHouse et déduplication
+Once the instructions are ready, a request is sent to the model's API using HTTP. The model replies with information in JSON format, which is then understood. The system is designed to expect that the model may give back text that includes JSON, or even JSON that isn't complete. So, strong methods are used to pull out the right JSON structure no matter what the exact form of the reply is.
 
-La dernière étape du pipeline consiste à envoyer les données finales dans une base ClickHouse. L’implémentation se trouve dans db_io/clickhouse_io.py. Le code commence par établir une connexion au serveur ClickHouse grâce aux paramètres définis dans les variables d’environnement.
+### 6.4 Cleaning and normalizing the response
 
-La première opération consiste à vérifier l’existence de la base de données et de la table cible. Si elles ne sont pas présentes, elles sont créées automatiquement. La table utilise un moteur MergeTree, adapté à l’ingestion de données structurées avec tri par timestamp.
+The model output is then cleaned: numerical amounts are corrected, dates are standardized, and CPF, CNPJ, or other administrative identifiers are correctly interpreted. This step transforms imprecise textual values ​​into consistent formats usable in an analytical database.
 
-Avant de procéder à l’insertion, le pipeline réalise un nettoyage des données afin d’en retirer toutes les métadonnées internes, comme la réponse brute du modèle ou les indicateurs de validation. Seuls les champs métier finaux sont conservés.
+### 6.5 Validation against the diagram
 
-Pour garantir l’absence de doublons, le pipeline compare les données à insérer aux données déjà présentes dans ClickHouse. Il sérialise chaque entrée en JSON trié, puis vérifie si cette représentation existe déjà dans la table. Ce mécanisme permet au pipeline d’être réexécuté sans risquer de réinsérer plusieurs fois les mêmes documents.
+After the data is organized, it is checked against the original plan. Any differences or missing parts are noted in a collection of information that points out mistakes or issues. This helps to keep track of how well the data was gathered and sets up ways to fix problems later on.
 
-Une fois la déduplication effectuée, les nouvelles données sont insérées dans ClickHouse, prêtes pour les analyses ultérieures.
+## 7. Insertion into ClickHouse and deduplication
 
-## 8. Conclusion générale
+The last part of the process involves putting the final information into a ClickHouse database. The program for this is found in db_io/clickhouse_io. py. It starts by connecting to the ClickHouse server using the settings set in the environment variables. 
 
-Le pipeline mis en place constitue un système complet et structuré, allant de l’ingestion brute d’un document jusqu’à son intégration finale dans une base analytique. Les différentes étapes — découverte, extraction, OCR, sauvegarde, structuration via LLM, validation, déduplication et ingestion — créent un flux cohérent et robuste.
+The first thing it does is check if the database and the specific table are there. If they are missing, it creates them automatically. The table uses a MergeTree engine, which is good for handling organized data sorted by time. 
 
-Cette architecture est pensée pour être évolutive. Il est possible d’ajouter de nouveaux types de documents en ajoutant simplement un schéma JSON, ou encore de remplacer le modèle de langage par un autre sans altérer les modules existants. Le pipeline est également résilient : les erreurs réseau, les PDFs scannés illisibles, ou les retours erronés du modèle sont pris en charge par différents mécanismes de fallback.
+Before adding any new information, the pipeline cleans up the data by getting rid of all the internal details, like the original model responses or checking flags. It keeps only the important business fields. 
+
+To make sure there aren’t any repeats, the pipeline checks the new data against what is already in ClickHouse. It turns every entry into sorted JSON and then sees if that version is already in the table. This way, the pipeline can run again without accidentally adding the same documents more than once. 
+
+After eliminating duplicates, the new information is added to ClickHouse, making it ready for more analysis.
+
+## 8. Conclusion 
+
+The pipeline that has been set up is a well-organized system that takes a document from when it first comes in to when it is finally added to an analytical database. The different steps—finding, pulling out information, using optical character recognition (OCR), saving, organizing with a language model, checking, removing duplicates, and putting it in the system—make a strong and clear process. 
+
+This system is made to grow easily. You can add new types of documents just by including a JSON schema, or you can change the language model without needing to change the other parts. The pipeline can also handle problems: if there are network issues, if scanned PDFs cannot be read, or if the model gives wrong answers, there are backup systems in place to take care of that.
 
