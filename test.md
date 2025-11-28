@@ -57,19 +57,17 @@ Le pipeline commence par explorer le stockage MinIO afin de déterminer les doss
 
 Après cette phase d’extraction, toutes les informations obtenues sont stockées dans une base SQLite temporaire, qui est ensuite sauvegardée dans un bucket MinIO séparé. Cette sauvegarde joue un rôle essentiel dans la traçabilité du pipeline : elle permet de garder une archive complète de l’extraction brute, avant toute transformation sémantique par un modèle de langage.
 
-L’étape suivante constitue le cœur du traitement métier. Les extraits textuels et XML sont soumis à un modèle de langage (LLM) via une API. Le modèle reçoit un prompt construit automatiquement à partir d’un schéma JSON qui définit les champs attendus pour ce type de document. La sortie du modèle est ensuite analysée, nettoyée, corrigée et validée. Enfin, les données validées sont envoyées dans ClickHouse, où elles sont insérées de manière dédupliquée.
+L’étape suivante constitue le cœur du traitement métier. Les extraits textuels et XML sont soumis à un modèle de langage (LLM) via une API. Le modèle reçoit un prompt construit automatiquement à partir d’un schéma JSON qui définit les champs attendus pour ce type de document. La sortie du modèle est ensuite analysée, nettoyée, corrigée et validée. Enfin, les données validées sont envoyées dans ClickHouse, où elles sont insérées de manière dédupliquée.  
 
-Cette architecture met en œuvre un pipeline complet, allant du document brut jusqu’à une donnée structurée et prête à être exploitée.
+3. Récupération et découverte des documents dans MinIO
 
-3. Découverte et téléchargement des documents depuis MinIO
+Le pipeline débute par l’exploration du bucket MinIO d’entrée, via le module db_io/data_io.py. Ce module initialise un client MinIO configuré à partir des variables d’environnement. Il est entièrement responsable de la découverte de l’arborescence de documents.
 
-Le pipeline commence par analyser le contenu du bucket MinIO. Tout le travail de découverte est réalisé dans db_io/data_io.py. Le module initialise un client MinIO configuré via les variables d’environnement.
+La fonction utilisée pour cela inspecte un chemin racine défini (BASE_DOCS_PATH) et identifie tous les sous-dossiers présents. Parmi ceux-ci, seuls certains types de documents sont considérés comme pertinents. Ils sont définis dans une liste interne selon les besoins du projet. Le code analyse ensuite le contenu de ces dossiers et en extrait la liste exacte des fichiers à traiter. Le résultat est un dictionnaire qui associe chaque type de document à une liste de fichiers à ingérer.
 
-Le rôle de ce composant est de traverser le préfixe défini (généralement un dossier racine tel que “SKZ Oberle - Amostra DOCS/”), d’identifier les sous-dossiers correspondant à des types de documents, puis de lister les fichiers présents dans chacun de ces dossiers. Les données sont ensuite renvoyées sous forme d’un dictionnaire Python où chaque clé correspond à un type de document et chaque valeur à la liste des fichiers.
+Dans sa version actuelle, le pipeline est configuré pour ne traiter qu’un seul type de document afin de faciliter les tests et la validation. Cependant, cette restriction n’est qu’un choix temporaire et peut être retirée pour étendre le traitement à tous les dossiers détectés.
 
-Le pipeline utilise ensuite une méthode dédiée pour télécharger chaque fichier identifié. Les fichiers ne sont pas stockés localement mais seulement chargés en mémoire, ce qui permet de traiter des volumes importants sans encombrer le disque.
-
-Cette première étape est essentielle car elle détermine l’ensemble des documents qui seront transmis aux phases suivantes.
+Une fois cette étape de découverte réalisée, le pipeline télécharge chaque fichier brut depuis MinIO sous forme binaire. Ces fichiers téléchargés sont ensuite transmis à la phase d’extraction.
 
 4. Extraction du contenu (PDF, OCR et XML)
 
@@ -114,41 +112,41 @@ Le fonctionnement peut être représenté de manière synthétique ainsi :
 
 4.2. Extraction PDF native
 
-Lorsque le fichier est un PDF, le pipeline commence par utiliser la bibliothèque pdfplumber. Celle-ci permet de récupérer le texte exact contenu dans le fichier sans passer par une reconnaissance optique. Elle permet également d'extraire automatiquement les tableaux, ce qui s’avère indispensable pour les documents financiers.
+Lorsque le fichier est un PDF, la première tentative d’extraction est réalisée via la bibliothèque pdfplumber. Cette méthode permet d’obtenir directement le texte numérique du document, lorsqu’il existe, ainsi que la structure des pages. En parallèle, les éventuels tableaux contenus dans le PDF sont détectés et extraits, ce qui est particulièrement utile pour les documents comptables ou déclaratifs.
 
-Cependant, certains PDF ne contiennent aucun texte numérique. C’est le cas par exemple des documents scannés. Afin de déterminer si l’extraction PDF native est exploitable, un score de qualité est calculé en mesurant la proportion de caractères incohérents ou non lisibles. Si ce score dépasse un certain seuil, le pipeline décide que le document doit passer par une étape OCR.
+Un score de qualité du texte est ensuite calculé. Ce score permet de déterminer si le contenu extrait est exploitable ou si le document est probablement une version scannée dépourvue de texte numérique. Cette étape est essentielle, car un document scanné nécessitera un traitement complètement différent.
 
 4.3. Passage automatique par l’OCR
 
-Lorsque le texte natif est considéré comme inutilisable, le pipeline effectue une extraction OCR qui implique deux étapes : d’abord la transformation des pages PDF en images haute résolution via PyMuPDF, puis la reconnaissance optique du texte avec EasyOCR. Les résultats sont ensuite assemblés et nettoyés afin de reconstituer un texte propre et uniforme.
+Lorsque le texte obtenu est trop bruité ou insuffisant, le pipeline bascule automatiquement vers une extraction OCR, qui consiste à produire une image de chaque page PDF puis à appliquer un modèle de reconnaissance optique de caractères.
 
-Ce mécanisme de fallback rend le pipeline robuste face à des documents scannés, mal numérisés ou très hétérogènes.
+Cette version OCR repose sur EasyOCR et PyMuPDF. PyMuPDF est utilisé pour rendre les pages en images haute résolution, tandis qu’EasyOCR analyse ces images et restitue un texte brut. À l’issue de cette reconnaissance, le texte est consolidé, nettoyé et normalisé avec la bibliothèque ftfy, ce qui permet d’obtenir un rendu lisible même pour des documents scannés de qualité médiocre.
 
 4.4. Extraction XML
 
-Les fichiers XML sont traités différemment : ils ne nécessitent ni parsing complexe ni OCR. Le pipeline lit directement le contenu du fichier, compile une version textuelle utilisable pour le modèle de langage, et renvoie également des métadonnées comme la taille du document ou son chemin d’origine.
+La gestion des fichiers XML est plus directe. Le pipeline lit le contenu complet du fichier, vérifie la taille du document, nettoie les éventuels caractères problématiques, puis retourne une structure simple contenant le texte XML. Cette approche garantit une parfaite conservation du contenu original, ce qui est essentiel pour les étapes suivantes.
 
 5. Sauvegarde en base SQLite et archivage MinIO
 
-Une fois l’extraction terminée, toutes les données sont stockées dans une base SQLite temporaire avant d’être envoyées dans un bucket MinIO dédié aux sauvegardes. Cette étape est entièrement gérée par tasks/sqlite_saver.py.
+Après l’extraction, le pipeline sauvegarde l’ensemble des données dans une base SQLite temporaire. Cette étape est gérée par tasks/sqlite_saver.py et constitue une caractéristique importante du pipeline.
 
-La sauvegarde regroupe, dans une même base :
+L’idée consiste à conserver un instantané complet de l’extraction brute sous un format universel, compact et facilement transportable : SQLite. Le système crée ainsi une base par type de document et y enregistre :
 
-les extractions textuelles issues des PDF (qu’elles proviennent de l’OCR ou non),
+les extraits textuels PDF,
 
-les tableaux détectés,
+les tableaux identifiés dans les PDF,
 
-les contenus XML bruts,
+les contenus XML,
 
-un ensemble de métadonnées décrivant le type de document et les résultats d’extraction.
+un ensemble de métadonnées liées à l’extraction.
 
-Chaque type de document génère sa propre base SQLite. Celle-ci est ensuite envoyée en tant que fichier binaire dans un répertoire spécifique du bucket MinIO.
+Une fois la base SQLite constituée, elle est stockée sous forme d’un fichier temporaire, chargé en mémoire puis envoyé dans le bucket MinIO dédié aux backups. Le nom du fichier SQLite inclut automatiquement un horodatage ainsi que le type de document correspondant.
 
-Ce mécanisme d’archivage possède plusieurs objectifs : il fournit une trace complète de l’état du document au moment de son extraction, il permet de rejouer le pipeline sans avoir à re-télécharger les documents bruts, et il constitue un outil utile pour les audits ou les analyses manuelles.
+Cette stratégie présente plusieurs avantages. D’abord, elle offre un mécanisme de sauvegarde automatique fiable, en cas d’erreur au cours des traitements ultérieurs. Ensuite, elle permet de rerun le pipeline à partir des données extraites sans avoir à recharger ou réextraire les documents sources.
 
 6. Traitement sémantique et structuration via un modèle de langage (LLM)
 
-Après la sauvegarde, les données extraites sont transmises au module process.py. Celui-ci représente la partie “intelligence” du pipeline : il permet de transformer du texte libre en structure JSON cohérente, prête à être utilisée pour de l’analyse ou de l’intégration dans une base.
+Une fois les données extraites et sauvegardées, la prochaine étape consiste à transformer ces informations brutes en données structurées exploitables. Ce traitement sémantique est réalisé via un modèle de langage, appelé à travers une API locale ou externe. Cette étape est implémentée dans process.py.
 
 6.1. Schéma général du traitement LLM
 
@@ -187,35 +185,37 @@ Le fonctionnement global peut être représenté ainsi :
 
 6.2. Construction du prompt
 
-Le pipeline commence par charger un schéma JSON définissant les champs attendus pour le type de document en question. Le texte extrait est ensuite intégré dans un prompt riche décrivant les règles que doit suivre le modèle : structure de sortie, types de champs, formats à respecter, erreurs à éviter.
+Le code commence par charger un schéma JSON spécifique à chaque type de document. Ce schéma définit les champs attendus ainsi que leurs types. Le texte extrait précédemment est ensuite injecté dans un prompt qui décrit précisément au modèle de langage les informations qu’il doit identifier.
 
-Ce prompt est crucial pour obtenir une sortie la plus propre possible.
+La construction du prompt est particulièrement importante. Il doit être suffisamment explicite pour guider correctement le modèle, tout en évitant les ambiguïtés. Il contient donc la liste des champs exigés, des exemples de formats attendus, ainsi que l’extrait textuel complet du document.
 
 6.3. Requête vers le modèle de langage
 
-Le pipeline envoie ensuite le prompt à l’API LLM via une requête HTTP. Le modèle renvoie du texte contenant un JSON ou un quasi-JSON. Cette sortie doit généralement être corrigée, car le modèle peut introduire du texte additionnel, des remarques, ou des erreurs de syntaxe JSON.
+Une fois le prompt préparé, un appel HTTP est effectué vers l’API du modèle. Le modèle renvoie une réponse contenant du JSON, qui est ensuite interprété. Le pipeline prévoit la possibilité que le modèle fournisse un texte contenant du JSON, ou bien un JSON incomplet. De ce fait, un parsing robuste est implémenté pour extraire la structure JSON correcte quel que soit le format exact renvoyé.
 
-6.4. Parsing, normalisation et validation
+6.4 Nettoyage et normalisation de la réponse
 
-Une étape de parsing robuste est alors appliquée pour extraire le JSON réel.
-Ensuite, le pipeline nettoie les données : conversion cohérente des montants, interprétation correcte des dates (différents formats possibles), détection précise des identifiants numériques.
+La sortie du modèle est ensuite nettoyée : correction des montants numériques, formatage normalisé des dates, interprétation correcte des CPF, CNPJ, ou autres identifiants administratifs. Cette étape permet de transformer des valeurs textuelles imprécises en formats cohérents utilisables dans une base analytique.
 
-Enfin, le JSON nettoyé est comparé au schéma d’origine pour déterminer si la sortie du modèle est valide. Les éventuels écarts sont enregistrés dans un champ de métadonnées, mais n’empêchent pas nécessairement l’ingestion.
+6.5 Validation par rapport au schéma
+
+Une fois les données structurées, elles sont comparées au schéma initial. Toute divergence ou absence de champ est consignée dans un ensemble de métadonnées qui identifie les erreurs ou inconsistances. Cela permet à la fois de tracer la qualité de l’extraction et de définir des mécanismes de correction dans le futur.
 
 7. Insertion dans ClickHouse et déduplication
 
-La dernière étape du pipeline consiste à envoyer les données structurées dans ClickHouse, via le module db_io/clickhouse_io.py. Celui-ci vérifie d’abord l’existence de la base et de la table utilisées pour l’ingestion. Si celles-ci n’existent pas, elles sont créées automatiquement.
+La dernière étape du pipeline consiste à envoyer les données finales dans une base ClickHouse. L’implémentation se trouve dans db_io/clickhouse_io.py. Le code commence par établir une connexion au serveur ClickHouse grâce aux paramètres définis dans les variables d’environnement.
 
-Avant l’insertion, le pipeline supprime tous les champs non pertinents tels que les réponses brutes du modèle, les métadonnées ou les chemins de fichiers. Les objets JSON sont ensuite triés et convertis en chaîne afin de faciliter la déduplication.
+La première opération consiste à vérifier l’existence de la base de données et de la table cible. Si elles ne sont pas présentes, elles sont créées automatiquement. La table utilise un moteur MergeTree, adapté à l’ingestion de données structurées avec tri par timestamp.
 
-La phase de déduplication repose sur une comparaison des JSON présents dans la table à ceux que le pipeline souhaite insérer. Cela garantit que la même extraction ne sera jamais insérée deux fois, même si l’on relance le pipeline plusieurs fois.
+Avant de procéder à l’insertion, le pipeline réalise un nettoyage des données afin d’en retirer toutes les métadonnées internes, comme la réponse brute du modèle ou les indicateurs de validation. Seuls les champs métier finaux sont conservés.
 
-Une fois les données filtrées, elles sont insérées dans la table ClickHouse, prête à être utilisée dans des analyses ultérieures.
+Pour garantir l’absence de doublons, le pipeline compare les données à insérer aux données déjà présentes dans ClickHouse. Il sérialise chaque entrée en JSON trié, puis vérifie si cette représentation existe déjà dans la table. Ce mécanisme permet au pipeline d’être réexécuté sans risquer de réinsérer plusieurs fois les mêmes documents.
+
+Une fois la déduplication effectuée, les nouvelles données sont insérées dans ClickHouse, prêtes pour les analyses ultérieures.
 
 8. Conclusion générale
 
-L’architecture présentée dans ce document constitue un pipeline complet et robuste permettant d’automatiser l’ingestion et le traitement de documents hétérogènes. Le pipeline combine plusieurs approches complémentaires : extraction directe, analyse OCR, sauvegarde systématique, traitement sémantique via modèle de langage et ingestion analytique.
+Le pipeline mis en place constitue un système complet et structuré, allant de l’ingestion brute d’un document jusqu’à son intégration finale dans une base analytique. Les différentes étapes — découverte, extraction, OCR, sauvegarde, structuration via LLM, validation, déduplication et ingestion — créent un flux cohérent et robuste.
 
-Grâce à une séparation claire des responsabilités entre modules, le système est facilement maintenable et extensible. On peut y ajouter de nouveaux types de documents ou adapter la logique d’extraction et de validation sans remettre en cause l’ensemble du pipeline.
+Cette architecture est pensée pour être évolutive. Il est possible d’ajouter de nouveaux types de documents en ajoutant simplement un schéma JSON, ou encore de remplacer le modèle de langage par un autre sans altérer les modules existants. Le pipeline est également résilient : les erreurs réseau, les PDFs scannés illisibles, ou les retours erronés du modèle sont pris en charge par différents mécanismes de fallback.
 
-Cette architecture répond aux besoins d’un système moderne d’ingestion documentaire, capable de traiter de grands volumes, d’assurer une qualité contrôlée et d’intégrer des données structurées dans un environnement analytique avancé.
