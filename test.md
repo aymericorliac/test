@@ -1,6 +1,4 @@
-Documentation complète du pipeline d’ingestion, d’extraction et de traitement de documents
 
-(Version longue, détaillée, avec schémas)
 
 1. Introduction générale
 
