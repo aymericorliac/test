@@ -51,7 +51,15 @@ Voici une première représentation globale du fonctionnement du pipeline, depui
                       └─────────────────────────────────────────────────────────────┘
 
 
-Cette vision d’ensemble montre chaque étape comme un bloc indépendant. Les sections suivantes détaillent leur fonctionnement interne.
+L’architecture globale suit une logique linéaire, mais chaque étape peut gérer ses propres erreurs ou corrections automatiques. On peut la décrire comme une succession de transformations du document initial jusqu’à sa version finale prête pour l’analyse dans ClickHouse.
+
+Le pipeline commence par explorer le stockage MinIO afin de déterminer les dossiers et les fichiers pertinents à traiter. Une fois les documents identifiés, chaque fichier est téléchargé en mémoire puis transmis au module d’extraction. Ce module traite les PDF en extrayant d’abord le texte natif, puis bascule automatiquement vers une extraction OCR si le texte est jugé insuffisant ou illisible. Les fichiers XML sont interprétés différemment : ils sont chargés tels quels, nettoyés et convertis en une version texte prête à être traitée par la suite.
+
+Après cette phase d’extraction, toutes les informations obtenues sont stockées dans une base SQLite temporaire, qui est ensuite sauvegardée dans un bucket MinIO séparé. Cette sauvegarde joue un rôle essentiel dans la traçabilité du pipeline : elle permet de garder une archive complète de l’extraction brute, avant toute transformation sémantique par un modèle de langage.
+
+L’étape suivante constitue le cœur du traitement métier. Les extraits textuels et XML sont soumis à un modèle de langage (LLM) via une API. Le modèle reçoit un prompt construit automatiquement à partir d’un schéma JSON qui définit les champs attendus pour ce type de document. La sortie du modèle est ensuite analysée, nettoyée, corrigée et validée. Enfin, les données validées sont envoyées dans ClickHouse, où elles sont insérées de manière dédupliquée.
+
+Cette architecture met en œuvre un pipeline complet, allant du document brut jusqu’à une donnée structurée et prête à être exploitée.
 
 3. Découverte et téléchargement des documents depuis MinIO
 
