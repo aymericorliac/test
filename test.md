@@ -2,11 +2,11 @@
 
 1. Introduction générale
 
-Le pipeline décrit dans ce document permet de réaliser une ingestion automatisée et complète de documents administratifs ou comptables, principalement des fichiers PDF et XML déposés dans un environnement MinIO. L’objectif de ce système est de transformer des documents bruts en données structurées, validées et exploitables au sein d’une base analytique ClickHouse.
+Le pipeline présenté dans ce document est conçu pour automatiser l’ingestion, l’extraction et l’analyse sémantique de documents administratifs variés (PDF, XML). Ce système a été pensé pour traiter des volumes importants, de manière robuste, tout en garantissant la traçabilité et la structuration des données.
 
-Le fonctionnement repose sur une succession d’étapes, chacune prenant en entrée le résultat de la précédente. Le processus inclut notamment la détection des documents, leur téléchargement, l’extraction du texte ou des tables, l’application automatique d’un OCR lorsque nécessaire, la sauvegarde complète en bases SQLite temporaires, puis une phase de traitement sémantique via un modèle de langage. Finalement, les données sont validées, dédupliquées et insérées dans une base ClickHouse.
+Le point de départ du pipeline est un environnement MinIO qui joue le rôle de stockage objet et contient des dossiers organisés par type de document. À partir de cet environnement, l’ensemble du processus se déroule sans intervention humaine : découverte des fichiers, téléchargement, extraction du contenu, restructuration grâce à un modèle de langage, sauvegarde intermédiaire dans une base SQLite, et enfin ingestion dans une base analytique ClickHouse.
 
-L’ensemble de ce pipeline est orchestré par un script central, main.py. Chaque composant du système est développé dans un module distinct, de manière à obtenir une architecture propre, lisible et facile à faire évoluer.
+Le pipeline est entièrement orchestré par le fichier main.py, qui coordonne successivement toutes les étapes. Chaque composant du système est isolé dans un module dédié, ce qui favorise non seulement la lisibilité du code, mais aussi sa maintenabilité et sa capacité à évoluer dans le futur.
 
 2. Vue d’ensemble de l’architecture
 
