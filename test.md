@@ -110,6 +110,8 @@ Le fonctionnement peut être représenté de manière synthétique ainsi :
                                 ▼
                        Extraction brute XML
 
+
+
 ### 4.2. Extraction PDF native
 
 Lorsque le fichier est un PDF, la première tentative d’extraction est réalisée via la bibliothèque pdfplumber. Cette méthode permet d’obtenir directement le texte numérique du document, lorsqu’il existe, ainsi que la structure des pages. En parallèle, les éventuels tableaux contenus dans le PDF sont détectés et extraits, ce qui est particulièrement utile pour les documents comptables ou déclaratifs.
