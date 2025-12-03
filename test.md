@@ -2,12 +2,9 @@
 
 &ensp;The dimensional modeling developed was focused on the tax payment process and was structured using the Star Schema approach. This is because the Star Schema focuses on simplicity, ease of navigation, and high performance in analytical queries, characteristics that fit scenarios aiming for BI use where the main objective is to allow quick analyses of payments made by companies over time. Furthermore, no need for complex hierarchies was identified, which might otherwise lead us to choose a Snowflake approach.
 
-## Data Model Documentation: `fato_tributos`
+## 2. Implemented Star Schema for this sprint
 
-Following the Star Schema standard, the model built organizes information about tax and tribute payments (`tributos`) in a simple and easy-to-analyze way. The central fact table stores the financial values, and the surrounding dimension tables provide the necessary context: time, company, location, and document type.
-
-The core idea is that each tribute record is linked to a specific contributor, location, document type, and two distinct date roles (issuance and due date).
-
+&ensp;&ensp;Following the Star Schema standard, the model we built organizes the information about invoices in a simple and easy-to-analyze way. At the center is the fact table, which stores the invoice values, and around it are the dimension tables, which bring the details about time, company, and type of operation. The idea is that each invoice is linked to a single date, a specific operation, and the companies involved, while each date, each operation, and each company can appear in several different invoices. This view greatly simplifies day-to-day analysis: you just choose a period, a type of operation, or a set of companies and see how that affects the total amount transacted.
 
 ### Detailed Table Analysis
 
