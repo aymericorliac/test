@@ -193,3 +193,71 @@ Table dim_tipo_documento {
   origem_label varchar
 }
 ```
+#### 3. Fact Table: `fato_folha_pagamento`
+
+The fact table, `fato_folha_pagamento` (Payroll), is the central point for analyzing monthly payroll expenses and related liabilities. **Each row represents a summary of the payroll for a specific company and competence period (month)**. This table captures the key financial metrics related to employment costs: `valor_principal` (total salaries/wages), `valor_descontos` (total deductions), `valor_encargos` (total charges/onus), `valor_fgts` (FGTS contributions), `valor_inss` (INSS contributions), and the crucial `valor_total` (total payroll expense).
+
+It also stores important operational metrics, such as `quantidade_funcionarios` (the number of employees) and descriptive fields like `observacoes`. This table links to the identity of the employing company and the two essential date dimensions required for payroll analysis: the date the document was created and the specific competence period it covers.
+
+
+<div align="center">
+  <sub>Figure 3 - Fact table Fato Folha Pagamento </sub><br>
+  <img src="https://res.cloudinary.com/dm5korpwy/image/upload/v1764777022/fato_folha_pagamento_cjmu2f.png">
+  <sup>Source: Material produced by the authors (2025).</sup>
+</div>
+
+The analytical framework is established by the shared dimension tables that surround `fato_folha_pagamento`, providing comprehensive context for every payroll record.
+
+The **`dim_data`** dimension is utilized in a classic **role-playing** scenario, linking to the fact table through two distinct foreign keys: `data_emissao_key` (the date the payroll document was generated) and `competencia_key` (the period, usually the month, to which the expenses apply). This dual linkage allows analysts to differentiate between when the expense was recorded versus the period it relates to, enabling accurate time-series analysis based on the calendar attributes like Year and Month.
+
+The **`dim_empresa`** table provides the identity of the **employing company** via the `cnpj_empresa_key`. By centralizing attributes like `razao_social`, `inscricao_estadual`, and `tipo_pessoa` here, analysis becomes company-centric, allowing users to track payroll metrics by entity type, state registration, or simply the business name.
+
+Together, these dimensions transform raw payroll figures into meaningful business insights, allowing analysts to quickly answer sophisticated questions regarding **how much** was paid in salaries, **how many** employees were involved, **when** the expense was incurred, and **which company** generated the liability, all segmented by time components.
+
+##### DBML Code 
+
+```dbml
+Table fato_folha_pagamento {
+  folha_id varchar [pk]
+  ingested_at timestamp
+  cnpj_empresa_key varchar
+  data_emissao_key int
+  competencia_key int
+  quantidade_funcionarios int
+  valor_principal decimal
+  valor_descontos decimal
+  valor_encargos decimal
+  valor_fgts decimal
+  valor_inss decimal
+  valor_total decimal
+  observacoes text
+  arquivo varchar
+  caminho_completo varchar
+  label varchar
+
+  // Foreign Keys
+  cnpj_empresa_key varchar [ref: > dim_empresa.cnpj]
+  data_emissao_key int [ref: > dim_data.data_key]
+  competencia_key int [ref: > dim_data.data_key] 
+}
+
+Table dim_data {
+  data_key int [pk]
+  data_completa date
+  ano int
+  mes int
+  trimestre int
+  dia_mes int
+  dia_semana int
+  nome_mes varchar
+  ano_mes varchar
+}
+
+Table dim_empresa {
+  cnpj varchar [pk]
+  razao_social varchar
+  inscricao_estadual varchar
+  inscricao_municipal varchar
+  tipo_pessoa varchar
+}
+```
