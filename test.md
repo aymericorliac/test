@@ -15,8 +15,11 @@ The fact table, `fato_tributos`, represents the most granular and valuable part 
 Along with these values, we store crucial tracking information, such as the `numero_principal`, the fiscal `codigo_receita` (revenue code), the `competencia` (the reference period the tax applies to), and the `orgao_emissor` (the issuing body). This table achieves its analytical power by connecting to the context dimensions through codes—the foreign keys: `tipo_documento_key`, `cnpj_contribuinte_key`, `data_emissao_key`, `data_vencimento_key`, and `localidade_key`. These foreign keys are the indispensable bridges used to retrieve descriptive details for every recorded payment.
 
 
-
-##### 1.1 The Dimensional Roles of `fato_tributos`
+<div align="center">
+  <sub>Figure 1 - Fact table Fato Triburtos </sub><br>
+  <img src="https://res.cloudinary.com/dm5korpwy/image/upload/v1764775118/fato_tributos_zt1yb7.png">
+  <sup>Source: Material produced by the authors (2025).</sup>
+</div>
 
 The analytical framework is established by the four shared dimension tables that surround `fato_tributos`, providing a comprehensive context for every payment.
 
@@ -30,7 +33,7 @@ Finally, the **`dim_tipo_documento`** dimension, linked by `tipo_documento_key`,
 
 Together, these dimensions transform raw financial figures into meaningful business insights, allowing analysts to quickly answer sophisticated questions regarding **who** paid **what** **when**, **where**, and under **which category** of fiscal obligation.
 
-### DBML Code (Diagram)
+##### DBML Code 
 
 ```dbml
 Table fato_tributos {
