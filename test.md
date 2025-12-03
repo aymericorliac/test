@@ -13,8 +13,9 @@ The fact table, `fato_tributos`, represents the most granular level: **each row 
 
 Key non-metric attributes include `numero_principal`, `codigo_receita` (revenue code), `competencia` (reference period), and `orgao_emissor` (issuing body). The table uses five foreign keys to connect to its dimensions: `tipo_documento_key`, `cnpj_contribuinte_key`, `data_emissao_key`, `data_vencimento_key`, and `localidade_key`.
 
+
 <div align="center">
-  <sub>Figure 1 - Fact Fiscal Notes Modelling </sub><br>
+  <sub>Figure 1 - Fact table Fato Triburtos </sub><br>
   <img src="https://res.cloudinary.com/dm5korpwy/image/upload/v1764775118/fato_tributos_zt1yb7.png">
   <sup>Source: Material produced by the authors (2025).</sup>
 </div>
