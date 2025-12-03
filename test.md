@@ -1,3 +1,7 @@
+# 1. Dimensional Modelling
+
+&ensp;The dimensional modeling developed was focused on the tax payment process and was structured using the Star Schema approach. This is because the Star Schema focuses on simplicity, ease of navigation, and high performance in analytical queries, characteristics that fit scenarios aiming for BI use where the main objective is to allow quick analyses of payments made by companies over time. Furthermore, no need for complex hierarchies was identified, which might otherwise lead us to choose a Snowflake approach.
+
 ## Data Model Documentation: `fato_tributos`
 
 Following the Star Schema standard, the model built organizes information about tax and tribute payments (`tributos`) in a simple and easy-to-analyze way. The central fact table stores the financial values, and the surrounding dimension tables provide the necessary context: time, company, location, and document type.
