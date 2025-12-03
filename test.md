@@ -15,9 +15,10 @@ Key non-metric attributes include `numero_principal`, `codigo_receita` (revenue 
 
 <div align="center">
   <sub>Figure 1 - Fact Fiscal Notes Modelling </sub><br>
-  <img src="https://res.cloudinary.com/dqfkrzpz3/image/upload/v1763761801/Fact_notas_fiscais_y3cuui.png">
+  <img src="https://res.cloudinary.com/dm5korpwy/image/upload/v1764775118/fato_tributos_zt1yb7.png">
   <sup>Source: Material produced by the authors (2025).</sup>
 </div>
+
 
 
 
