@@ -442,7 +442,7 @@ Beyond the metrics, it stores unique identifiers and tracking information such a
 
 <div align="center">
   <sub>Figure 6 - Fact table Fato Documentos Fiscais </sub><br>
-  <img src="https://res.cloudinary.com/dm5korpwy/image/upload/v1764775118/fato_documentos_fiscais_sample_e6l1t8.png">
+  <img src="https://res.cloudinary.com/dm5korpwy/image/upload/v1764777394/fato_documentos_fiscais_yeifbh.png">
   <sup>Source: Material produced by the authors (2025).</sup>
 </div>
 
