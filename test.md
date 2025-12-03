@@ -538,3 +538,12 @@ Table dim_tipo_documento {
   categoria varchar
   origem_label varchar
 }
+```
+
+## 3. Conclusion: The Integrated Dimensional Bus
+
+The resulting data model represents a robust **Dimensional Bus Architecture**, integrating six distinct business processes (`fato_tributos`, `fato_imoveis`, `fato_folha_pagamento`, `fato_escrituracao`, `fato_escritura`, and `fato_documentos_fiscais`) through a set of shared and standardized dimensions (`dim_data`, `dim_empresa`, `dim_localidade`, `dim_tipo_documento`, `dim_prestator_tornador`).
+
+This centralized design ensures maximum data consistency and analytical flexibility. By establishing **common dimensions**—such as `dim_data` for all time-based events and `dim_empresa` for all corporate entities—the model supports **cross-process analysis**. Analysts can now compare tax payments (`fato_tributos`) against declared values in fiscal filings (`fato_escrituracao`) or track operational costs in payroll (`fato_folha_pagamento`) against service revenues (`fato_documentos_fiscais`), all using the same set of trusted business attributes (CNPJ, date, location).
+
+The use of **role-playing keys** (e.g., `data_emissao_key` vs. `data_vencimento_key`) and **multi-role dimensions** (e.g., `dim_prestator_tornador` acting as both the Provider and Taker) addresses the complexity of fiscal data while preserving the simplicity and high performance inherent to the Star Schema approach. This architecture is scalable, ready to integrate future fact tables without redefining existing context, making it a sustainable foundation for advanced business intelligence and regulatory compliance analysis.
