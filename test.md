@@ -10,32 +10,25 @@
 
 #### 1. Fact Table: `fato_tributos`
 
-The fact table, `fato_tributos`, represents the most granular level: **each row is an individual tax or tribute payment**. This is where we store the key measurable metrics: `valor_principal` (Principal value), `valor_juros` (Interest), `valor_multa` (Fine), `valor_descontos` (Discounts), and `valor_total` (Total value).
+The fact table, `fato_tributos`, represents the most granular and valuable part of the system: **every single record corresponds to a distinct tax or tribute payment event recorded in the system**. This is the repository for the quantitative measures that are the focus of business intelligence: `valor_principal` (the base amount), `valor_juros` (interest accrued), `valor_multa` (fines), `valor_descontos` (any reductions), and the key metric, `valor_total` (the final paid amount).
 
-Key non-metric attributes include `numero_principal`, `codigo_receita` (revenue code), `competencia` (reference period), and `orgao_emissor` (issuing body). The table uses five foreign keys to connect to its dimensions: `tipo_documento_key`, `cnpj_contribuinte_key`, `data_emissao_key`, `data_vencimento_key`, and `localidade_key`.
-
-
-<div align="center">
-  <sub>Figure 1 - Fact table Fato Triburtos </sub><br>
-  <img src="https://res.cloudinary.com/dm5korpwy/image/upload/v1764775118/fato_tributos_zt1yb7.png">
-  <sup>Source: Material produced by the authors (2025).</sup>
-</div>
+Along with these values, we store crucial tracking information, such as the `numero_principal`, the fiscal `codigo_receita` (revenue code), the `competencia` (the reference period the tax applies to), and the `orgao_emissor` (the issuing body). This table achieves its analytical power by connecting to the context dimensions through codes—the foreign keys: `tipo_documento_key`, `cnpj_contribuinte_key`, `data_emissao_key`, `data_vencimento_key`, and `localidade_key`. These foreign keys are the indispensable bridges used to retrieve descriptive details for every recorded payment.
 
 
 
+##### 1.1 The Dimensional Roles of `fato_tributos`
 
-#### 2. Dimensions and Their Roles
+The analytical framework is established by the four shared dimension tables that surround `fato_tributos`, providing a comprehensive context for every payment.
 
-This fact table is linked to four shared dimensions:
+The **`dim_data`** dimension acts as the master time reference, playing two distinct roles through `data_emissao_key` (the document's creation date) and `data_vencimento_key` (the required payment date). This dual role is crucial for comparing timely payments versus overdue liabilities, or tracking latency between issuance and due dates, using ready-made calendar attributes like Year, Quarter, and Month Name.
 
-| Dimension | Primary Key | Role(s) in Fact Table | Key Attributes |
-| :--- | :--- | :--- | :--- |
-| **dim_data** | `data_key` | Date of Issuance (`data_emissao_key`), Due Date (`data_vencimento_key`) | Year, Quarter, Month Name |
-| **dim_empresa** | `cnpj` | Contributing Company CNPJ (`cnpj_contribuinte_key`) | Business Name, State (UF), Type |
-| **dim_localidade** | `localidade_key` | Document Location (`localidade_key`) | Municipality, State (UF), CEP |
-| **dim_tipo_documento** | `tipo_documento_key` | Document Context (`tipo_documento_key`) | Subtype, Category, Origin Label |
+The **`dim_empresa`** table provides the identity of the **contributing company** via the `cnpj_contribuinte_key`. By centralizing attributes like `razao_social`, `inscricao_estadual`, and `tipo_pessoa` here, analysis becomes contributor-centric, allowing easy pivoting to view total tax values by state registration status or entity type.
 
-This structure facilitates analyses such as: "What is the total `valor_multa` accrued on taxes whose `data_vencimento_key` falls in the last quarter?" or "Compare the `valor_total` of taxes for different `tipo_pessoa` from `dim_empresa`."
+The **`dim_localidade`** dimension links the tax record to its geographical context through the `localidade_key`. This table, containing the Municipality, State (UF), and neighborhood, enables powerful regional analysis, allowing users to drill down or roll up tax revenue based on geography.
+
+Finally, the **`dim_tipo_documento`** dimension, linked by `tipo_documento_key`, clarifies the nature of the tax obligation itself. Attributes like Subtype, Category, and Origin Label allow analysts to segment the fact data based on the source or classification of the underlying document.
+
+Together, these dimensions transform raw financial figures into meaningful business insights, allowing analysts to quickly answer sophisticated questions regarding **who** paid **what** **when**, **where**, and under **which category** of fiscal obligation.
 
 ### DBML Code (Diagram)
 
