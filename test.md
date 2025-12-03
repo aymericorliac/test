@@ -433,3 +433,108 @@ Table dim_prestator_tornador {
   tipo varchar
 }
 ```
+#### 6. Fact Table: `fato_documentos_fiscais`
+
+The fact table, `fato_documentos_fiscais`, is the transactional core of the fiscal documentation domain, representing **every individual fiscal document** (such as an invoice or a note) processed by the system. This table holds a large variety of measurable metrics that are critical for analysis, including `valor_servicos` (service value), `base_calculo` (calculation base), `valor_iss` (ISS tax value), `valor_deducoes` (deductions), `valor_descontos` (discounts), and the overall `valor_total` (total value).
+
+Beyond the metrics, it stores unique identifiers and tracking information such as `numero_documento`, `numero_serie`, `access_key`, and details about the document's authorization (`authorization_protocol`, `authorization_datetime`). This table is complex due to its multiple links to identity dimensions, requiring **role-playing dimensions** to distinguish between the various parties involved (Principal, Provider, Taker).
+
+
+<div align="center">
+  <sub>Figure 6 - Fact table Fato Documentos Fiscais </sub><br>
+  <img src="https://res.cloudinary.com/dm5korpwy/image/upload/v1764775118/fato_documentos_fiscais_sample_e6l1t8.png">
+  <sup>Source: Material produced by the authors (2025).</sup>
+</div>
+
+The analytical framework is established by the shared dimension tables that surround `fato_documentos_fiscais`, providing comprehensive context for every fiscal document.
+
+The **`dim_data`** dimension, linked by `data_emissao_key`, establishes the precise temporal context (when the document was created) and allows analysts to aggregate metrics by Year, Quarter, or Month Name.
+
+The company dimensions play a crucial and multi-faceted role:
+* The **`dim_empresa`** dimension is linked via `cnpj_principal_key` to identify the **main entity** responsible for the document, providing consistent access to attributes like the business's `razao_social` and `inscricao_estadual`.
+* The **`dim_prestator_tornador`** dimension is utilized twice: once via `cnpj_prestador_key` to identify the **service provider**, and a second time via `cnpj_tomador_key` to identify the **service taker** (recipient). This double linking is vital for performing comparisons and flow analysis (e.g., "Total services provided to CNPJ X versus total services received from CNPJ Y").
+
+The **`dim_localidade`** dimension, linked by `localidade_key`, provides the necessary geographical context (Municipality, State, CEP) related to the document's origin.
+
+Finally, the **`dim_tipo_documento`** dimension, linked by `tipo_documento_key`, clarifies the category and subtype of the fiscal document, enabling segmentation of financial metrics based on the document's legal nature.
+
+Together, these connections allow for advanced analysis such as tracking the flow of service values between different geographical regions, distinguishing between services provided and services received, all within a specific document category and time period.
+
+##### DBML Code 
+
+```dbml
+Table fato_documentos_fiscais {
+  documento_id varchar [pk]
+  ingested_at timestamp
+  numero_documento varchar
+  numero_serie varchar
+  codigo_autenticidade varchar
+  aliquota_iss decimal
+  base_calculo decimal
+  valor_servicos decimal
+  valor_total decimal
+  valor_iss decimal
+  valor_deducoes decimal
+  valor_descontos decimal
+  descricao_servicos text
+  competencia varchar
+  arquivo varchar
+  caminho_completo varchar
+  access_key varchar
+  authorization_protocol varchar
+  authorization_datetime timestamp
+  label varchar
+
+  // Foreign Keys (Dimensions are shared across the data model)
+  cnpj_principal_key varchar [ref: > dim_empresa.cnpj]
+  cnpj_prestador_key varchar [ref: > dim_prestator_tornador.cnpj]
+  cnpj_tomador_key varchar [ref: > dim_prestator_tornador.cnpj]
+  tipo_documento_key int [ref: > dim_tipo_documento.tipo_documento_key]
+  data_emissao_key int [ref: > dim_data.data_key]
+  localidade_key int [ref: > dim_localidade.localidade_key]
+}
+
+Table dim_data {
+  data_key int [pk]
+  data_completa date
+  ano int
+  mes int
+  trimestre int
+  dia_mes int
+  dia_semana int
+  nome_mes varchar
+  ano_mes varchar
+}
+
+Table dim_empresa {
+  cnpj varchar [pk]
+  razao_social varchar
+  inscricao_estadual varchar
+  inscricao_municipal varchar
+  tipo_pessoa varchar
+}
+
+Table dim_prestator_tornador {
+  cnpj varchar [pk]
+  razao_social varchar
+  tipo varchar
+}
+
+Table dim_localidade {
+  localidade_key int [pk]
+  municipio varchar
+  uf varchar
+  bairro varchar
+  cep varchar
+  logradouro varchar
+  numero varchar
+  complemento varchar
+}
+
+Table dim_tipo_documento {
+  tipo_documento_key int [pk]
+  tipo_documento varchar
+  subtipo_documento varchar
+  categoria varchar
+  origem_label varchar
+}
