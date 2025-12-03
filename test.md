@@ -261,3 +261,81 @@ Table dim_empresa {
   tipo_pessoa varchar
 }
 ```
+#### 4. Fact Table: `fato_escrituracao`
+
+The fact table, `fato_escrituracao`, deals with fiscal declaration records and general bookkeeping summaries. **Each row represents a specific filing or a summarized entry for a given entity and competence period**. The table stores the aggregated measure, `valor_total` (total value declared/recorded), and numerous non-metric attributes essential for tracking compliance and filing details.
+
+Key descriptive fields include `ano_calendario` (calendar year), `competencia` (reference period), `protocolo_entrega` (delivery protocol number), `hash_receita` (revenue service hash), `tipo_escrituracao` (type of filing), and `situacao_especial` (special status). This table links to the entity responsible for the filing, the date of issuance, and the type of document/filing involved.
+
+
+<div align="center">
+  <sub>Figure 4 - Fact table Fato Escrituração </sub><br>
+  <img src="https://res.cloudinary.com/dm5korpwy/image/upload/v1764777226/fato_escrituracao_lxpcsg.png">
+  <sup>Source: Material produced by the authors (2025).</sup>
+</div>
+
+The analytical framework is established by the shared dimension tables that surround `fato_escrituracao`, providing essential context for every filing record.
+
+The **`dim_data`** dimension, linked by `data_emissao_key`, provides the temporal context (when the filing document was created). This allows analysts to track the submission date and aggregate metrics based on calendar attributes like Year, Quarter, and Month Name.
+
+The **`dim_empresa`** table provides the identity of the **filing entity** via the `cnpj_entidade_key`. Centralizing attributes like `razao_social` and `inscricao_estadual` here ensures that analyses are consistently tracked against the responsible corporate entity, enabling easy filtering and segmentation of filings by company attributes.
+
+The **`dim_tipo_documento`** dimension, linked by `tipo_documento_key`, is crucial for classifying the nature of the fiscal filing (e.g., SPED, ECF, ECD). Attributes like Subtype, Category, and Origin Label allow analysts to segment the total declared values (`valor_total`) based on the type of compliance document used.
+
+Together, these dimensions enable complex analysis focused on compliance and reporting integrity, allowing analysts to quickly answer sophisticated questions regarding **who** filed **what** type of document, **when** it was submitted, and **what was the total value** reported in the declaration, all segmented by time and entity attributes.
+
+##### DBML Code 
+
+```dbml
+Table fato_escrituracao {
+  escrituracao_id varchar [pk]
+  ingested_at timestamp
+  tipo_documento_key int
+  cnpj_entidade_key varchar
+  data_emissao_key int
+  ano_calendario int
+  competencia varchar
+  protocolo_entrega varchar
+  hash_receita varchar
+  tipo_escrituracao varchar
+  situacao_especial varchar
+  valor_total decimal
+  orgao_emissor varchar
+  arquivo varchar
+  caminho_completo varchar
+  label varchar
+
+  // Foreign Keys
+  tipo_documento_key int [ref: > dim_tipo_documento.tipo_documento_key]
+  cnpj_entidade_key varchar [ref: > dim_empresa.cnpj]
+  data_emissao_key int [ref: > dim_data.data_key]
+}
+
+Table dim_data {
+  data_key int [pk]
+  data_completa date
+  ano int
+  mes int
+  trimestre int
+  dia_mes int
+  dia_semana int
+  nome_mes varchar
+  ano_mes varchar
+}
+
+Table dim_empresa {
+  cnpj varchar [pk]
+  razao_social varchar
+  inscricao_estadual varchar
+  inscricao_municipal varchar
+  tipo_pessoa varchar
+}
+
+Table dim_tipo_documento {
+  tipo_documento_key int [pk]
+  tipo_documento varchar
+  subtipo_documento varchar
+  categoria varchar
+  origem_label varchar
+}
+```
