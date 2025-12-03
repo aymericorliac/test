@@ -339,3 +339,97 @@ Table dim_tipo_documento {
   origem_label varchar
 }
 ```
+#### 5. Fact Table: `fato_escritura`
+
+The fact table, `fato_escritura`, represents records of notarized acts and legal instruments. **Each row is a single notarized event**, containing descriptive attributes crucial for legal and fiscal analysis, rather than relying solely on additive numerical measures. As this is often a **factless fact table** or a **fact table containing only descriptive attributes**, it captures the context of the legal event itself.
+
+Key descriptive fields include `tipo_documento`, `subtipo_documento`, `categoria`, and `origem_label`. These attributes are denormalized from the type dimension to provide quick access to the legal nature of the act. This table links extensively to several dimensions to fully contextualize **who**, **when**, **where**, and **what** happened in the legal transaction.
+
+
+
+<div align="center">
+  <sub>Figure 5 - Fact table Fato Escritura </sub><br>
+  <img src="https://res.cloudinary.com/dm5korpwy/image/upload/v1764777345/fato_escritura_qwuss4.png">
+  <sup>Source: Material produced by the authors (2025).</sup>
+</div>
+
+The analytical framework is established by the five shared dimension tables that surround `fato_escritura`, providing comprehensive context for every legal record.
+
+The **`dim_data`** dimension, linked by `data_escritura_key`, establishes the precise temporal context (when the act was notarized), allowing analysis of the legal activity volume over specific periods using calendar attributes like Year, Quarter, and Month Name.
+
+The **`dim_empresa`** table provides the identity of the **main entity** involved via the `cnpj_key`.
+
+The **`dim_prestator_tornador`** dimension links via `cnpj_prestator_tornador_key` to identify the role of the other party involved in the legal instrument (e.g., service provider or taker in the context of the act).
+
+The **`dim_localidade`** dimension, linked by `localidade_key`, provides the necessary geographical context (Municipality, State, CEP) related to where the notarization took place.
+
+Finally, the **`dim_tipo_documento`** dimension, although denormalized into the fact table, is linked by `tipo_documento_key` to ensure the integrity of the document's classification (Category, Subtype).
+
+Together, these dimensions enable complex analysis focused on transactional context, allowing analysts to quickly answer sophisticated questions regarding **who** was involved in **which type** of legal act, **when** and **where** it was executed, all segmented by entity and location attributes.
+
+##### DBML Code 
+
+```dbml
+Table fato_escritura {
+  escritura_id varchar [pk]
+  tipo_documento_key int
+  cnpj_key varchar
+  data_escritura_key int
+  localidade_key int
+  cnpj_prestator_tornador_key varchar // Added for the complete model
+  
+  // Descriptive attributes (often denormalized in factless facts)
+  tipo_documento varchar
+  subtipo_documento varchar
+  categoria varchar
+  origem_label varchar
+  
+  // Example of potential measures (if any)
+  // valor_ato decimal
+}
+
+Table dim_data {
+  data_key int [pk]
+  data_completa date
+  ano int
+  mes int
+  trimestre int
+  dia_mes int
+  dia_semana int
+  nome_mes varchar
+  ano_mes varchar
+}
+
+Table dim_empresa {
+  cnpj varchar [pk]
+  razao_social varchar
+  inscricao_estadual varchar
+  inscricao_municipal varchar
+  tipo_pessoa varchar
+}
+
+Table dim_localidade {
+  localidade_key int [pk]
+  municipio varchar
+  uf varchar
+  bairro varchar
+  cep varchar
+  logradouro varchar
+  numero varchar
+  complemento varchar
+}
+
+Table dim_tipo_documento {
+  tipo_documento_key int [pk]
+  tipo_documento varchar
+  subtipo_documento varchar
+  categoria varchar
+  origem_label varchar
+}
+
+Table dim_prestator_tornador {
+  cnpj varchar [pk]
+  razao_social varchar
+  tipo varchar
+}
+```
