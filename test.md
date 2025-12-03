@@ -1,545 +1,97 @@
-# 1. Dimensional Modelling
-
-&ensp;The dimensional modeling developed was focused on the tax payment process and was structured using the Star Schema approach. This is because the Star Schema focuses on simplicity, ease of navigation, and high performance in analytical queries, characteristics that fit scenarios aiming for BI use where the main objective is to allow quick analyses of payments made by companies over time. Furthermore, no need for complex hierarchies was identified, which might otherwise lead us to choose a Snowflake approach.
-
-## 2. Implemented Star Schema for this sprint
-
-&ensp;&ensp;Following the Star Schema standard, the model we built organizes the information about invoices in a simple and easy-to-analyze way. At the center is the fact table, which stores the invoice values, and around it are the dimension tables, which bring the details about time, company, and type of operation. The idea is that each invoice is linked to a single date, a specific operation, and the companies involved, while each date, each operation, and each company can appear in several different invoices. This view greatly simplifies day-to-day analysis: you just choose a period, a type of operation, or a set of companies and see how that affects the total amount transacted.
-
-### Detailed Table Analysis
-
-#### 1. Fact Table: `fato_tributos`
-
-The fact table, `fato_tributos`, represents the most granular and valuable part of the system: **every single record corresponds to a distinct tax or tribute payment event recorded in the system**. This is the repository for the quantitative measures that are the focus of business intelligence: `valor_principal` (the base amount), `valor_juros` (interest accrued), `valor_multa` (fines), `valor_descontos` (any reductions), and the key metric, `valor_total` (the final paid amount).
-
-Along with these values, we store crucial tracking information, such as the `numero_principal`, the fiscal `codigo_receita` (revenue code), the `competencia` (the reference period the tax applies to), and the `orgao_emissor` (the issuing body). This table achieves its analytical power by connecting to the context dimensions through codes—the foreign keys: `tipo_documento_key`, `cnpj_contribuinte_key`, `data_emissao_key`, `data_vencimento_key`, and `localidade_key`. These foreign keys are the indispensable bridges used to retrieve descriptive details for every recorded payment.
-
-
-<div align="center">
-  <sub>Figure 1 - Fact table Fato Triburtos </sub><br>
-  <img src="https://res.cloudinary.com/dm5korpwy/image/upload/v1764775118/fato_tributos_zt1yb7.png">
-  <sup>Source: Material produced by the authors (2025).</sup>
-</div>
-
-The analytical framework is established by the four shared dimension tables that surround `fato_tributos`, providing a comprehensive context for every payment.
+# Logical Filtering and Analytical Query Processing in ClickHouse
 
-The **`dim_data`** dimension acts as the master time reference, playing two distinct roles through `data_emissao_key` (the document's creation date) and `data_vencimento_key` (the required payment date). This dual role is crucial for comparing timely payments versus overdue liabilities, or tracking latency between issuance and due dates, using ready-made calendar attributes like Year, Quarter, and Month Name.
+## 1. Introduction
 
-The **`dim_empresa`** table provides the identity of the **contributing company** via the `cnpj_contribuinte_key`. By centralizing attributes like `razao_social`, `inscricao_estadual`, and `tipo_pessoa` here, analysis becomes contributor-centric, allowing easy pivoting to view total tax values by state registration status or entity type.
+Once all documents have been extracted, cleaned, and reorganized by the language model, the pipeline enters its final and most analytical stage. Up to this point, the system has dealt with raw files, OCR conversions, PDF text extraction, XML decoding, and semantic interpretation through the LLM. The result of these steps is a collection of JSON structures that capture the essential business information contained in each document. However, these JSON objects—as clean as they are—still need to be transformed into a stable format that analysts and applications can query efficiently. This is where the last stage of the pipeline becomes essential.
 
-The **`dim_localidade`** dimension links the tax record to its geographical context through the `localidade_key`. This table, containing the Municipality, State (UF), and neighborhood, enables powerful regional analysis, allowing users to drill down or roll up tax revenue based on geography.
+The goal of this stage is to turn flexible, semi-structured JSON into a reliable analytical dataset. JSON is excellent for capturing the variety and complexity of administrative documents, but it is not directly suitable for large-scale querying or business intelligence. Different documents may contain different fields, similar fields may appear in different shapes, and timestamps or numerical values may not yet follow a uniform format. If these JSON objects were exposed directly to analysts, every query would require repeated parsing, cleaning, and validation. To avoid this, the pipeline converts the JSON layer into a fully structured analytical layer inside ClickHouse.
 
-Finally, the **`dim_tipo_documento`** dimension, linked by `tipo_documento_key`, clarifies the nature of the tax obligation itself. Attributes like Subtype, Category, and Origin Label allow analysts to segment the fact data based on the source or classification of the underlying document.
+This entire transformation relies on two key modules. The first module, `clickhouse_io.py`, is responsible for inserting the structured documents into a dedicated ingestion table. Before insertion, the module applies several important operations: it removes debugging fields or internal metadata added during extraction, verifies that the JSON is complete, and checks whether the document already exists to prevent duplicates. This initial cleaning is crucial because the ingestion table acts as the single source of truth for all downstream processing. Each entry stored in this table represents a faithful but minimal version of the document, ready to be reshaped analytically.
 
-Together, these dimensions transform raw financial figures into meaningful business insights, allowing analysts to quickly answer sophisticated questions regarding **who** paid **what** **when**, **where**, and under **which category** of fiscal obligation.
+The second module, `data_cube.py`, builds everything that comes after ingestion. Its purpose is to interpret the JSON stored in ClickHouse and convert it into structured analytical views. These views mimic the structure of a relational model by turning JSON keys into typed columns. They also apply logical filters to ensure that only consistent and meaningful documents appear in analytical results. For instance, documents missing essential fields—such as dates, company identifiers, or numeric values—are automatically excluded. Beyond filtering, this module organizes the dataset into a classical star schema: a set of dimensions that describe time, companies, and operation types, all connected to a central fact table that holds the document's metrics.
 
-##### DBML Code 
+By combining these two modules, the pipeline succeeds in bridging the gap between the flexibility of JSON extraction and the rigor required for analysis. The ingestion layer keeps all documents in a raw but clean form, while the analytical layer reshapes them into structured views ready for dashboards, queries, and business intelligence tasks. This architecture gives the system both robustness and adaptability: new document types can be added without changing the database structure, and analysts always have a consistent and reliable environment to work with.
 
-```dbml
-Table fato_tributos {
-  tributo_id varchar [pk]
-  ingested_at timestamp
-  numero_principal varchar
-  codigo_receita varchar
-  competencia varchar
-  periodo_apuracao varchar
-  valor_principal decimal
-  valor_juros decimal
-  valor_multa decimal
-  valor_descontos decimal
-  valor_total decimal
-  orgao_emissor varchar
-  arquivo varchar
-  caminho_completo varchar
-  label varchar
-
-  // Foreign Keys
-  tipo_documento_key int [ref: > dim_tipo_documento.tipo_documento_key]
-  cnpj_contribuinte_key varchar [ref: > dim_empresa.cnpj]
-  data_emissao_key int [ref: > dim_data.data_key]
-  data_vencimento_key int [ref: > dim_data.data_key]
-  localidade_key int [ref: > dim_localidade.localidade_key]
-}
-
-Table dim_data {
-  data_key int [pk]
-  data_completa date
-  ano int
-  mes int
-  trimestre int
-  dia_mes int
-  dia_semana int
-  nome_mes varchar
-  ano_mes varchar
-}
-
-Table dim_empresa {
-  cnpj varchar [pk]
-  razao_social varchar
-  inscricao_estadual varchar
-  inscricao_municipal varchar
-  tipo_pessoa varchar
-}
-
-Table dim_localidade {
-  localidade_key int [pk]
-  municipio varchar
-  uf varchar
-  bairro varchar
-  cep varchar
-  logradouro varchar
-  numero varchar
-  complemento varchar
-}
-
-Table dim_tipo_documento {
-  tipo_documento_key int [pk]
-  tipo_documento varchar
-  subtipo_documento varchar
-  categoria varchar
-  origem_label varchar
-}
-```
-#### 2. Fact Table: `fato_imoveis`
-
-The fact table, `fato_imoveis`, centralizes data related to property records and associated fiscal details. **Each row represents a specific property record or transaction event**, storing key metrics associated with the property's value and fiscal obligations. The core measurable metrics include `valor_principal` (principal property value), `valor_descontos` (any granted discounts), and `valor_total` (total assessed value).
-
-The table also holds key non-metric identifiers such as `inscricao_imobiliaria` (real estate registration number), `exercicio` (fiscal year), and `parcela` (installment number). This table links to dimensions that identify the owner, the location of the property, the document's date, and the type of fiscal document related to the property.
-
-
-<div align="center">
-  <sub>Figure 2 - Fact table Fato Imóveis </sub><br>
-  <img src="https://res.cloudinary.com/dm5korpwy/image/upload/v1764776794/fato_imoveis_d2bxqk.png">
-  <sup>Source: Material produced by the authors (2025).</sup>
-</div>
-
-The analytical framework is established by the four shared dimension tables that surround `fato_imoveis`, providing comprehensive context for every property record.
-
-The **`dim_data`** dimension acts as the master time reference, playing a role through `data_emissao_key` (the document's creation date). This linkage allows for easy analysis of property valuation or assessment trends over specific periods using calendar attributes like Year, Quarter, and Month Name.
-
-The **`dim_empresa`** table provides the identity of the **property owner** via the `cnpj_proprietario_key`. By centralizing attributes like `razao_social`, `inscricao_estadual`, and `tipo_pessoa` here, analysis becomes owner-centric, allowing easy pivoting to view total property values by owner type or registration status.
-
-The **`dim_localidade`** dimension links the property record to its geographical context through the `localidade_key`. This table, containing the Municipality, State (UF), and neighborhood, enables powerful regional analysis, allowing users to drill down or roll up total property values based on geography, which is crucial for urban and fiscal planning analysis.
-
-Finally, the **`dim_tipo_documento`** dimension, linked by `tipo_documento_key`, clarifies the nature of the fiscal document associated with the property (e.g., assessment notice, tax bill). Attributes like Subtype, Category, and Origin Label allow analysts to segment the fact data based on the document's source or classification.
-
-Together, these dimensions transform raw property and fiscal figures into meaningful business insights, allowing analysts to quickly answer sophisticated questions regarding **who** owns **what** property, **where** it is located, **when** it was assessed, and under **which category** of fiscal document.
-
-##### DBML Code 
-
-```dbml
-Table fato_imoveis {
-  imovel_id varchar [pk]
-  ingested_at timestamp
-  tipo_documento_key int
-  cnpj_proprietario_key varchar
-  localidade_key int
-  data_emissao_key int
-  inscricao_imobiliaria varchar
-  exercicio int
-  parcela int
-  valor_principal decimal
-  valor_descontos decimal
-  valor_total decimal
-  data_validade date
-  orgao_emissor varchar
-  arquivo varchar
-  caminho_completo varchar
-  label varchar
-
-  // Foreign Keys
-  tipo_documento_key int [ref: > dim_tipo_documento.tipo_documento_key]
-  cnpj_proprietario_key varchar [ref: > dim_empresa.cnpj]
-  localidade_key int [ref: > dim_localidade.localidade_key]
-  data_emissao_key int [ref: > dim_data.data_key]
-}
-
-Table dim_data {
-  data_key int [pk]
-  data_completa date
-  ano int
-  mes int
-  trimestre int
-  dia_mes int
-  dia_semana int
-  nome_mes varchar
-  ano_mes varchar
-}
-
-Table dim_empresa {
-  cnpj varchar [pk]
-  razao_social varchar
-  inscricao_estadual varchar
-  inscricao_municipal varchar
-  tipo_pessoa varchar
-}
-
-Table dim_localidade {
-  localidade_key int [pk]
-  municipio varchar
-  uf varchar
-  bairro varchar
-  cep varchar
-  logradouro varchar
-  numero varchar
-  complemento varchar
-}
-
-Table dim_tipo_documento {
-  tipo_documento_key int [pk]
-  tipo_documento varchar
-  subtipo_documento varchar
-  categoria varchar
-  origem_label varchar
-}
-```
-#### 3. Fact Table: `fato_folha_pagamento`
-
-The fact table, `fato_folha_pagamento` (Payroll), is the central point for analyzing monthly payroll expenses and related liabilities. **Each row represents a summary of the payroll for a specific company and competence period (month)**. This table captures the key financial metrics related to employment costs: `valor_principal` (total salaries/wages), `valor_descontos` (total deductions), `valor_encargos` (total charges/onus), `valor_fgts` (FGTS contributions), `valor_inss` (INSS contributions), and the crucial `valor_total` (total payroll expense).
-
-It also stores important operational metrics, such as `quantidade_funcionarios` (the number of employees) and descriptive fields like `observacoes`. This table links to the identity of the employing company and the two essential date dimensions required for payroll analysis: the date the document was created and the specific competence period it covers.
-
-
-<div align="center">
-  <sub>Figure 3 - Fact table Fato Folha Pagamento </sub><br>
-  <img src="https://res.cloudinary.com/dm5korpwy/image/upload/v1764777022/fato_folha_pagamento_cjmu2f.png">
-  <sup>Source: Material produced by the authors (2025).</sup>
-</div>
-
-The analytical framework is established by the shared dimension tables that surround `fato_folha_pagamento`, providing comprehensive context for every payroll record.
-
-The **`dim_data`** dimension is utilized in a classic **role-playing** scenario, linking to the fact table through two distinct foreign keys: `data_emissao_key` (the date the payroll document was generated) and `competencia_key` (the period, usually the month, to which the expenses apply). This dual linkage allows analysts to differentiate between when the expense was recorded versus the period it relates to, enabling accurate time-series analysis based on the calendar attributes like Year and Month.
-
-The **`dim_empresa`** table provides the identity of the **employing company** via the `cnpj_empresa_key`. By centralizing attributes like `razao_social`, `inscricao_estadual`, and `tipo_pessoa` here, analysis becomes company-centric, allowing users to track payroll metrics by entity type, state registration, or simply the business name.
-
-Together, these dimensions transform raw payroll figures into meaningful business insights, allowing analysts to quickly answer sophisticated questions regarding **how much** was paid in salaries, **how many** employees were involved, **when** the expense was incurred, and **which company** generated the liability, all segmented by time components.
-
-##### DBML Code 
-
-```dbml
-Table fato_folha_pagamento {
-  folha_id varchar [pk]
-  ingested_at timestamp
-  cnpj_empresa_key varchar
-  data_emissao_key int
-  competencia_key int
-  quantidade_funcionarios int
-  valor_principal decimal
-  valor_descontos decimal
-  valor_encargos decimal
-  valor_fgts decimal
-  valor_inss decimal
-  valor_total decimal
-  observacoes text
-  arquivo varchar
-  caminho_completo varchar
-  label varchar
-
-  // Foreign Keys
-  cnpj_empresa_key varchar [ref: > dim_empresa.cnpj]
-  data_emissao_key int [ref: > dim_data.data_key]
-  competencia_key int [ref: > dim_data.data_key] 
-}
-
-Table dim_data {
-  data_key int [pk]
-  data_completa date
-  ano int
-  mes int
-  trimestre int
-  dia_mes int
-  dia_semana int
-  nome_mes varchar
-  ano_mes varchar
-}
-
-Table dim_empresa {
-  cnpj varchar [pk]
-  razao_social varchar
-  inscricao_estadual varchar
-  inscricao_municipal varchar
-  tipo_pessoa varchar
-}
-```
-#### 4. Fact Table: `fato_escrituracao`
-
-The fact table, `fato_escrituracao`, deals with fiscal declaration records and general bookkeeping summaries. **Each row represents a specific filing or a summarized entry for a given entity and competence period**. The table stores the aggregated measure, `valor_total` (total value declared/recorded), and numerous non-metric attributes essential for tracking compliance and filing details.
-
-Key descriptive fields include `ano_calendario` (calendar year), `competencia` (reference period), `protocolo_entrega` (delivery protocol number), `hash_receita` (revenue service hash), `tipo_escrituracao` (type of filing), and `situacao_especial` (special status). This table links to the entity responsible for the filing, the date of issuance, and the type of document/filing involved.
-
-
-<div align="center">
-  <sub>Figure 4 - Fact table Fato Escrituração </sub><br>
-  <img src="https://res.cloudinary.com/dm5korpwy/image/upload/v1764777226/fato_escrituracao_lxpcsg.png">
-  <sup>Source: Material produced by the authors (2025).</sup>
-</div>
-
-The analytical framework is established by the shared dimension tables that surround `fato_escrituracao`, providing essential context for every filing record.
-
-The **`dim_data`** dimension, linked by `data_emissao_key`, provides the temporal context (when the filing document was created). This allows analysts to track the submission date and aggregate metrics based on calendar attributes like Year, Quarter, and Month Name.
-
-The **`dim_empresa`** table provides the identity of the **filing entity** via the `cnpj_entidade_key`. Centralizing attributes like `razao_social` and `inscricao_estadual` here ensures that analyses are consistently tracked against the responsible corporate entity, enabling easy filtering and segmentation of filings by company attributes.
-
-The **`dim_tipo_documento`** dimension, linked by `tipo_documento_key`, is crucial for classifying the nature of the fiscal filing (e.g., SPED, ECF, ECD). Attributes like Subtype, Category, and Origin Label allow analysts to segment the total declared values (`valor_total`) based on the type of compliance document used.
-
-Together, these dimensions enable complex analysis focused on compliance and reporting integrity, allowing analysts to quickly answer sophisticated questions regarding **who** filed **what** type of document, **when** it was submitted, and **what was the total value** reported in the declaration, all segmented by time and entity attributes.
-
-##### DBML Code 
-
-```dbml
-Table fato_escrituracao {
-  escrituracao_id varchar [pk]
-  ingested_at timestamp
-  tipo_documento_key int
-  cnpj_entidade_key varchar
-  data_emissao_key int
-  ano_calendario int
-  competencia varchar
-  protocolo_entrega varchar
-  hash_receita varchar
-  tipo_escrituracao varchar
-  situacao_especial varchar
-  valor_total decimal
-  orgao_emissor varchar
-  arquivo varchar
-  caminho_completo varchar
-  label varchar
-
-  // Foreign Keys
-  tipo_documento_key int [ref: > dim_tipo_documento.tipo_documento_key]
-  cnpj_entidade_key varchar [ref: > dim_empresa.cnpj]
-  data_emissao_key int [ref: > dim_data.data_key]
-}
-
-Table dim_data {
-  data_key int [pk]
-  data_completa date
-  ano int
-  mes int
-  trimestre int
-  dia_mes int
-  dia_semana int
-  nome_mes varchar
-  ano_mes varchar
-}
-
-Table dim_empresa {
-  cnpj varchar [pk]
-  razao_social varchar
-  inscricao_estadual varchar
-  inscricao_municipal varchar
-  tipo_pessoa varchar
-}
-
-Table dim_tipo_documento {
-  tipo_documento_key int [pk]
-  tipo_documento varchar
-  subtipo_documento varchar
-  categoria varchar
-  origem_label varchar
-}
-```
-#### 5. Fact Table: `fato_escritura`
-
-The fact table, `fato_escritura`, represents records of notarized acts and legal instruments. **Each row is a single notarized event**, containing descriptive attributes crucial for legal and fiscal analysis, rather than relying solely on additive numerical measures. As this is often a **factless fact table** or a **fact table containing only descriptive attributes**, it captures the context of the legal event itself.
-
-Key descriptive fields include `tipo_documento`, `subtipo_documento`, `categoria`, and `origem_label`. These attributes are denormalized from the type dimension to provide quick access to the legal nature of the act. This table links extensively to several dimensions to fully contextualize **who**, **when**, **where**, and **what** happened in the legal transaction.
-
-
-
-<div align="center">
-  <sub>Figure 5 - Fact table Fato Escritura </sub><br>
-  <img src="https://res.cloudinary.com/dm5korpwy/image/upload/v1764777345/fato_escritura_qwuss4.png">
-  <sup>Source: Material produced by the authors (2025).</sup>
-</div>
-
-The analytical framework is established by the five shared dimension tables that surround `fato_escritura`, providing comprehensive context for every legal record.
-
-The **`dim_data`** dimension, linked by `data_escritura_key`, establishes the precise temporal context (when the act was notarized), allowing analysis of the legal activity volume over specific periods using calendar attributes like Year, Quarter, and Month Name.
-
-The **`dim_empresa`** table provides the identity of the **main entity** involved via the `cnpj_key`.
-
-The **`dim_prestator_tornador`** dimension links via `cnpj_prestator_tornador_key` to identify the role of the other party involved in the legal instrument (e.g., service provider or taker in the context of the act).
-
-The **`dim_localidade`** dimension, linked by `localidade_key`, provides the necessary geographical context (Municipality, State, CEP) related to where the notarization took place.
-
-Finally, the **`dim_tipo_documento`** dimension, although denormalized into the fact table, is linked by `tipo_documento_key` to ensure the integrity of the document's classification (Category, Subtype).
-
-Together, these dimensions enable complex analysis focused on transactional context, allowing analysts to quickly answer sophisticated questions regarding **who** was involved in **which type** of legal act, **when** and **where** it was executed, all segmented by entity and location attributes.
-
-##### DBML Code 
-
-```dbml
-Table fato_escritura {
-  escritura_id varchar [pk]
-  tipo_documento_key int
-  cnpj_key varchar
-  data_escritura_key int
-  localidade_key int
-  cnpj_prestator_tornador_key varchar // Added for the complete model
-  
-  // Descriptive attributes (often denormalized in factless facts)
-  tipo_documento varchar
-  subtipo_documento varchar
-  categoria varchar
-  origem_label varchar
-  
-  // Example of potential measures (if any)
-  // valor_ato decimal
-}
-
-Table dim_data {
-  data_key int [pk]
-  data_completa date
-  ano int
-  mes int
-  trimestre int
-  dia_mes int
-  dia_semana int
-  nome_mes varchar
-  ano_mes varchar
-}
-
-Table dim_empresa {
-  cnpj varchar [pk]
-  razao_social varchar
-  inscricao_estadual varchar
-  inscricao_municipal varchar
-  tipo_pessoa varchar
-}
-
-Table dim_localidade {
-  localidade_key int [pk]
-  municipio varchar
-  uf varchar
-  bairro varchar
-  cep varchar
-  logradouro varchar
-  numero varchar
-  complemento varchar
-}
-
-Table dim_tipo_documento {
-  tipo_documento_key int [pk]
-  tipo_documento varchar
-  subtipo_documento varchar
-  categoria varchar
-  origem_label varchar
-}
-
-Table dim_prestator_tornador {
-  cnpj varchar [pk]
-  razao_social varchar
-  tipo varchar
-}
-```
-#### 6. Fact Table: `fato_documentos_fiscais`
-
-The fact table, `fato_documentos_fiscais`, is the transactional core of the fiscal documentation domain, representing **every individual fiscal document** (such as an invoice or a note) processed by the system. This table holds a large variety of measurable metrics that are critical for analysis, including `valor_servicos` (service value), `base_calculo` (calculation base), `valor_iss` (ISS tax value), `valor_deducoes` (deductions), `valor_descontos` (discounts), and the overall `valor_total` (total value).
-
-Beyond the metrics, it stores unique identifiers and tracking information such as `numero_documento`, `numero_serie`, `access_key`, and details about the document's authorization (`authorization_protocol`, `authorization_datetime`). This table is complex due to its multiple links to identity dimensions, requiring **role-playing dimensions** to distinguish between the various parties involved (Principal, Provider, Taker).
-
-
-<div align="center">
-  <sub>Figure 6 - Fact table Fato Documentos Fiscais </sub><br>
-  <img src="https://res.cloudinary.com/dm5korpwy/image/upload/v1764777394/fato_documentos_fiscais_yeifbh.png">
-  <sup>Source: Material produced by the authors (2025).</sup>
-</div>
-
-The analytical framework is established by the shared dimension tables that surround `fato_documentos_fiscais`, providing comprehensive context for every fiscal document.
-
-The **`dim_data`** dimension, linked by `data_emissao_key`, establishes the precise temporal context (when the document was created) and allows analysts to aggregate metrics by Year, Quarter, or Month Name.
-
-The company dimensions play a crucial and multi-faceted role:
-* The **`dim_empresa`** dimension is linked via `cnpj_principal_key` to identify the **main entity** responsible for the document, providing consistent access to attributes like the business's `razao_social` and `inscricao_estadual`.
-* The **`dim_prestator_tornador`** dimension is utilized twice: once via `cnpj_prestador_key` to identify the **service provider**, and a second time via `cnpj_tomador_key` to identify the **service taker** (recipient). This double linking is vital for performing comparisons and flow analysis (e.g., "Total services provided to CNPJ X versus total services received from CNPJ Y").
-
-The **`dim_localidade`** dimension, linked by `localidade_key`, provides the necessary geographical context (Municipality, State, CEP) related to the document's origin.
-
-Finally, the **`dim_tipo_documento`** dimension, linked by `tipo_documento_key`, clarifies the category and subtype of the fiscal document, enabling segmentation of financial metrics based on the document's legal nature.
-
-Together, these connections allow for advanced analysis such as tracking the flow of service values between different geographical regions, distinguishing between services provided and services received, all within a specific document category and time period.
-
-##### DBML Code 
-
-```dbml
-Table fato_documentos_fiscais {
-  documento_id varchar [pk]
-  ingested_at timestamp
-  numero_documento varchar
-  numero_serie varchar
-  codigo_autenticidade varchar
-  aliquota_iss decimal
-  base_calculo decimal
-  valor_servicos decimal
-  valor_total decimal
-  valor_iss decimal
-  valor_deducoes decimal
-  valor_descontos decimal
-  descricao_servicos text
-  competencia varchar
-  arquivo varchar
-  caminho_completo varchar
-  access_key varchar
-  authorization_protocol varchar
-  authorization_datetime timestamp
-  label varchar
-
-  // Foreign Keys (Dimensions are shared across the data model)
-  cnpj_principal_key varchar [ref: > dim_empresa.cnpj]
-  cnpj_prestador_key varchar [ref: > dim_prestator_tornador.cnpj]
-  cnpj_tomador_key varchar [ref: > dim_prestator_tornador.cnpj]
-  tipo_documento_key int [ref: > dim_tipo_documento.tipo_documento_key]
-  data_emissao_key int [ref: > dim_data.data_key]
-  localidade_key int [ref: > dim_localidade.localidade_key]
-}
-
-Table dim_data {
-  data_key int [pk]
-  data_completa date
-  ano int
-  mes int
-  trimestre int
-  dia_mes int
-  dia_semana int
-  nome_mes varchar
-  ano_mes varchar
-}
-
-Table dim_empresa {
-  cnpj varchar [pk]
-  razao_social varchar
-  inscricao_estadual varchar
-  inscricao_municipal varchar
-  tipo_pessoa varchar
-}
-
-Table dim_prestator_tornador {
-  cnpj varchar [pk]
-  razao_social varchar
-  tipo varchar
-}
-
-Table dim_localidade {
-  localidade_key int [pk]
-  municipio varchar
-  uf varchar
-  bairro varchar
-  cep varchar
-  logradouro varchar
-  numero varchar
-  complemento varchar
-}
-
-Table dim_tipo_documento {
-  tipo_documento_key int [pk]
-  tipo_documento varchar
-  subtipo_documento varchar
-  categoria varchar
-  origem_label varchar
-}
-```
-
-## 3. Conclusion
-
-In the final design, all fact tables (such as money matters, employee salaries and property deals) follow the Star Schema rule. This method ensures that the structure is easy to understand and works well for analyzing data. By grouping important numbers together and connecting them to clear categories, this setup makes it easy to analyze different areas quickly and accurately, creating a strong and flexible base for Business Intelligence and checking for compliance.
+## 2. Preparing the JSON documents during insertion
+
+Before the documents are inserted into ClickHouse, they pass through a dedicated cleaning and preparation phase designed to ensure that only relevant and standardized information reaches the analytical layer. Even though the language model produces structured JSON, the output still contains a variety of auxiliary elements that are not meant to be stored in the final database. These may include debugging comments added during development, internal notes generated by the LLM, validation flags used to evaluate extraction quality, or temporary metadata produced during earlier steps of the pipeline such as OCR or PDF parsing. All of these extra fields are removed systematically, leaving only the business-relevant content that represents the true information extracted from the document.
+
+Once this pruning is complete, the pipeline performs a deduplication step that ensures no document is stored twice. Because administrative documents can appear multiple times in MinIO, or because the pipeline may be executed repeatedly on the same dataset, relying only on the file name or the timestamp would not be sufficient. Instead, the system builds a canonical version of the JSON: the keys are sorted in a consistent order, unnecessary whitespace is removed, and the structure is normalized so that two equivalent JSONs always produce the same canonical representation. This version is then compared directly with the JSON entries already stored in the ingestion table. If the canonical JSON already exists in ClickHouse, the document is considered a duplicate and is ignored. If not, it is inserted into the table. This strategy guarantees idempotency: running the pipeline multiple times will never insert the same document twice.
+
+After cleaning and deduplication, each valid document is stored as a single row in ClickHouse. The ingestion table acts as a stable archive of the structured documents and contains three types of information: the document type, which indicates whether it comes from a PDF, XML, invoice, receipt, or another category; a timestamp showing when this specific version was ingested; and the full structured JSON, preserved exactly as produced by the language model after cleaning. This table forms the foundation of the analytical system. All downstream transformations, filters, and aggregations rely on this stable and minimal representation of the original document.
+
+
+## 3. Converting raw JSON into analytical views
+
+The ingestion table keeps the data flexible by storing the documents exactly as JSON. However, analytical work requires structured columns. To bridge this gap, the pipeline uses a set of ClickHouse views defined in `data_cube.py`. These views extract fields from the JSON and convert them into typed columns such as strings, integers, floats, and dates.
+
+This transformation is essential because JSON values may vary in shape, and documents of different types may contain different fields. By using ClickHouse’s JSON extraction functions inside views, the system preserves the flexibility of ingestion while exposing a clean, relational structure for analysis.
+
+## 4. Applying logical filters inside the analytical views
+
+Each analytical view defined in `data_cube.py` contains an essential layer of logical filtering designed to protect the quality of the dataset. Although the ingestion table stores every cleaned JSON document produced by the pipeline, it does not guarantee that all documents are complete, valid, or analytically useful. Some may be missing important fields, others may contain malformed dates, and some might even correspond to document types that the analytical model is not intended to process. To avoid these issues, each view applies a series of filters that ensure only reliable records appear in downstream queries.
+
+### 4.1 Filtering by document type
+
+The first filter checks whether the stored document corresponds to the type of record expected by the analytical view. Since all documents—regardless of type—are stored together in the ingestion table, this filtering step is necessary to avoid mixing unrelated documents. For example, the analytical view dedicated to invoices only accepts entries whose `doc_type` field matches the expected invoice category, such as "danfe". Any document with a different type is immediately excluded. This ensures that each analytical view remains focused on a single, well-defined document structure.
+
+### 4.2 Ensuring the presence of required fields
+
+After verifying the document type, the view checks whether the JSON contains all fields that are essential for analytical queries. These fields vary depending on the document type but typically include identifiers (such as company IDs), timestamps (such as emission or registration dates), and key numerical values (such as invoice totals). If any of these mandatory elements is missing or empty, the record is discarded. This prevents the analytical layer from being polluted by incomplete documents that would otherwise result in misleading visualizations, broken aggregations, or null-value propagation.
+
+### 4.3 Validating field integrity and minimal content
+
+Logical filters also ensure that the document contains a minimum amount of meaningful content before being included in the analytical view. For example, documents whose structured JSON contains only a handful of keys—typically the result of OCR errors or incomplete LLM parsing—are removed. Likewise, JSON structures that exist but have no internal values (such as empty objects or arrays) are excluded. This helps maintain a high signal-to-noise ratio in the analytical model and protects the system from unstable extraction cases.
+
+### 4.4 Standardizing date fields
+
+Administrative documents frequently contain dates in inconsistent formats, such as “12/03/2024”, “2024-03-12”, or even strings like “12 March 2024”. Because these raw values come from the language model, they may also include minor variations depending on how the model interpreted the text. To ensure consistency, each analytical view applies ClickHouse functions to transform textual date representations into proper `Date` or `DateTime` types.  
+This standardization is crucial for reliable time-indexed analysis, such as grouping by month, ordering records chronologically, or computing year-over-year comparisons.
+
+### 4.5 Guaranteeing analytical stability
+
+Together, these filters play a vital role in ensuring that the analytical dataset remains stable and meaningful. Instead of exposing everything stored in the ingestion table, the views present only those documents that meet strict validity conditions. This design choice avoids incorrect or misleading results during analysis and ensures that dashboards, aggregations, and automated metrics rely exclusively on trustworthy data. In other words, the logical filters act as a safety net that protects the analytical layer from extraction imperfections, LLM inconsistencies, or unexpected document variations.
+
+
+## 5. Building the analytical star schema
+
+Once filtering is complete, the analytical layer organizes the data into a star-schema model. This schema is generated entirely from the ingestion table and requires no manual table creation.
+
+A complete time dimension is created covering several years. It contains the breakdown of days, months, quarters, and years, enabling time-series analysis at any level.
+
+A company dimension is created by extracting company identifiers from the JSON and assigning them stable keys using hashing. This dimension includes information related to both senders and recipients of the documents.
+
+Another dimension describes the nature of the operations. The pipeline analyzes the raw field representing the business operation and categorizes it using predefined rules. This allows grouping and comparing the different types of transactions.
+
+Finally, the fact table, created as a ClickHouse view, links all dimensions with the numerical metrics extracted from the documents such as invoice values or reported amounts. This table becomes the central entry point for business analysis.
+
+## 6. Querying the analytical layer
+
+With the analytical views built and the dimensions connected, querying becomes simple and consistent. Analysts no longer need to navigate raw JSON structures or interpret inconsistent fields. Instead, they can rely on stable columns that reflect cleaned, validated, and normalized values.
+
+Operations such as computing totals per month, identifying the most active companies, or analyzing trends across different operation types are made straightforward. The filtering logic applied earlier ensures reliable analytical results.
+
+The ClickHouse layer therefore transforms a heterogeneous set of administrative documents into a unified analytical model ready for dashboards or business intelligence tools.
+
+## 7. Connecting the Analytical Data App to the Data Cube
+
+With the data cube fully constructed in ClickHouse, the final component of the architecture is the analytical application that consumes this structured information. Although the earlier stages of the pipeline are focused on ingestion, extraction, semantic processing, and validation, the goal of the entire process is ultimately to make the information accessible for business exploration. The data-app acts as the interface between the analytical schema produced by the pipeline and the end users who rely on this data for reporting, monitoring, or decision-making.
+
+The connection between the data-app and the analytical layer is made possible thanks to the standardized structure built inside `data_cube.py`. Instead of querying raw JSON, the application communicates exclusively with stable ClickHouse views representing dimensions and fact tables. Because ClickHouse supports high-performance SQL querying, the data-app only needs a SQL client or a lightweight abstraction layer to interact with the data cube. Most data-apps connect using the native HTTP interface exposed by ClickHouse, meaning that each analytical request—from a dashboard, a filter panel, or a graph—corresponds to a live SQL query executed on the underlying views.
+
+This approach offers several advantages. First, the data-app interacts with a model that is fully typed: dates are proper `Date` objects, monetary values are numerical types, and identifiers are normalized. This guarantees stable and predictable behavior, regardless of the complexity of the original documents. Second, because the data cube follows a star-schema structure, the data-app can easily perform cross-dimensional analyses. For instance, a single query can combine the time dimension with the company dimension and the fact table to compute aggregates such as monthly totals per provider or yearly comparisons across activity types.
+
+The views defined in `data_cube.py` also remove any need for the data-app to know how the ingestion table is organized internally. The application is entirely decoupled from the ingestion logic: it does not need to parse JSON, interpret document types, or manage missing fields. All such concerns were handled earlier in the pipeline. This separation of responsibilities dramatically simplifies the frontend layer, which can focus solely on analytical logic and visualization.
+
+In practice, the data-app typically issues SQL queries directly against the fact table view since it aggregates all numerical metrics and connects to the different dimensions through predefined keys. For example, requesting the total revenue per month involves joining the fact table with the time dimension; identifying the most active suppliers requires joining with the company dimension. Because these relationships are already defined inside the analytical views, the data-app only executes straightforward SQL queries without needing to handle low-level data manipulation.
+
+This design also makes the system extensible. If a new type of document is added to the ingestion pipeline, the data cube can be extended by creating a new analytical view for that document type. The data-app does not require any structural change; it simply gains access to new fields and metrics exposed through ClickHouse. The same advantage applies if the company decides to integrate additional dashboards or external BI tools: as long as they can connect to ClickHouse, they can directly read from the data cube.
+
+In summary, the integration between the data cube and the data-app offers a clean and efficient path from complex administrative documents to ready-to-use business insights. The pipeline ensures that the analytical layer is consistent, validated, and fully structured, while the data-app leverages this model to provide fast, reliable, and meaningful access to the underlying information. Together, they form the final bridge between raw document ingestion and actionable, real-world analysis.
+
+
+## 8. Conclusion
+
+The logical filtering and analytical query layer completes the transformation pipeline. It converts flexible, semi-structured JSON documents into a clean and stable analytical environment. By combining strict validation, dynamic JSON extraction, and a robust star-schema model, the system enables scalable and reliable analysis of incoming documents.
+
+This architecture remains fully extensible. New document types can be added by simply extending the JSON schema and writing new analytical views. The ingestion layer stays unchanged, and the system continues to function without interruption. This approach ensures long-term flexibility while preserving analytical consistency.
